@@ -1,6 +1,6 @@
 import React, {useEffect, useMemo, useState} from 'react';
 import {NativeModules, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, View} from 'react-native';
-import {parseHrf, Player, Team} from './hrf';
+import {HrfSubstitution, parseHrf, Player, Team} from './hrf';
 import {estimateLineupSectors, estimateTacticLevel, getBehaviorsForSlot, getPlayerPositionEstimate, defaultMatchContext, MatchAttitude, MatchContext, MatchVenue, MatchWeather, matchAttitudes, matchVenues, matchWeathers, OpponentSectorRatings, PlayerBehavior, positionGroups, RatingTactic} from './positionRatings';
 import {getBenchSuggestions, getPlayerSlotEstimate, optimizeLineup} from './lineupOptimizer';
 
@@ -10,12 +10,26 @@ type Tactic = RatingTactic;
 type RatingKey = 'defenceLeft' | 'defenceCentral' | 'defenceRight' | 'midfield' | 'attackLeft' | 'attackCentral' | 'attackRight';
 type OpponentRatings = Record<RatingKey, string>;
 type MatchSettings = {teamSpirit: string; confidence: string; coachModifier: string; attitude: MatchAttitude; venue: MatchVenue};
-type PlannedSubstitution = {slot: string; outgoingPlayerId: string; incomingPlayerId: string; minute: number};
+type PlannedSubstitution = HrfSubstitution;
 
 const tabs: Tab[] = ['Plantilla', 'Alineación', 'Team Analyzer'];
 const formations: Formation[] = ['3-5-2', '4-4-2', '4-5-1', '5-3-2', '3-4-3'];
 const tactics: Tactic[] = ['Normal', 'Ataque por el centro', 'Ataque por las bandas', 'Contraataques', 'Presionar', 'Jugar creativamente', 'Tiros lejanos'];
 const defaultMatchSettings: MatchSettings = {teamSpirit: String(defaultMatchContext.teamSpirit), confidence: String(defaultMatchContext.confidence), coachModifier: String(defaultMatchContext.coachModifier), attitude: defaultMatchContext.attitude, venue: defaultMatchContext.venue};
+const goalConditions = [
+  {id: -1, label: 'Cualquier marcador'}, {id: 0, label: 'Empate'}, {id: 1, label: 'Vamos ganando'},
+  {id: 2, label: 'Vamos perdiendo'}, {id: 3, label: 'Ganamos por más de uno'}, {id: 4, label: 'Perdemos por más de uno'},
+  {id: 5, label: 'Empate o ganando'}, {id: 6, label: 'Empate o perdiendo'}, {id: 7, label: 'Ganamos por más de dos'},
+  {id: 8, label: 'Perdemos por más de dos'}, {id: 9, label: 'No vamos empatando'}, {id: 10, label: 'No perdemos por más de uno'},
+  {id: 11, label: 'No ganamos por más de uno'}, {id: 12, label: 'No perdemos por más de dos'}, {id: 13, label: 'No ganamos por más de dos'},
+];
+const redCardConditions = [
+  {id: -1, label: 'Sin condición de expulsión'}, {id: 1, label: 'Expulsan a un jugador nuestro'}, {id: 2, label: 'Expulsan a un rival'},
+  {id: 11, label: 'Expulsan a nuestro defensa central'}, {id: 12, label: 'Expulsan a nuestro centrocampista'}, {id: 13, label: 'Expulsan a nuestro delantero'},
+  {id: 14, label: 'Expulsan a nuestro lateral'}, {id: 15, label: 'Expulsan a nuestro extremo'}, {id: 21, label: 'Expulsan a un central rival'},
+  {id: 22, label: 'Expulsan a un centrocampista rival'}, {id: 23, label: 'Expulsan a un delantero rival'}, {id: 24, label: 'Expulsan a un lateral rival'},
+  {id: 25, label: 'Expulsan a un extremo rival'},
+];
 const skillMetrics: {key: keyof Player; label: string}[] = [
   {key: 'keeper', label: 'Portería'},
   {key: 'defending', label: 'Defensa'},
@@ -177,6 +191,8 @@ export default function App() {
   const [behaviors, setBehaviors] = useState<Record<string, PlayerBehavior>>({});
   const [plannedSubstitutions, setPlannedSubstitutions] = useState<PlannedSubstitution[]>([]);
   const [substitutionMinute, setSubstitutionMinute] = useState('60');
+  const [substitutionStanding, setSubstitutionStanding] = useState(-1);
+  const [substitutionCard, setSubstitutionCard] = useState(-1);
   const [previewMinute, setPreviewMinute] = useState('90');
   const [activeSlot, setActiveSlot] = useState<string | null>(null);
   const [storageReady, setStorageReady] = useState(false);
@@ -201,6 +217,7 @@ export default function App() {
   const projectedLineup = useMemo(() => {
     const projection = {...lineup};
     for (const substitution of [...plannedSubstitutions].sort((a, b) => a.minute - b.minute)) {
+      if (substitution.standing !== -1 || substitution.card !== -1) continue;
       if (substitution.minute > projectedMinute || projection[substitution.slot] !== substitution.outgoingPlayerId) continue;
       if (Object.values(projection).includes(substitution.incomingPlayerId)) continue;
       projection[substitution.slot] = substitution.incomingPlayerId;
@@ -256,7 +273,15 @@ export default function App() {
       setMatchSettings(savedMatchSettings);
       if (Array.isArray(state.plannedSubstitutions)) {
         const validIds = new Set(savedTeam?.players.map(player => player.id) ?? []);
-        setPlannedSubstitutions(state.plannedSubstitutions.filter((item): item is PlannedSubstitution => Boolean(item && typeof item === 'object' && typeof (item as PlannedSubstitution).slot === 'string' && typeof (item as PlannedSubstitution).outgoingPlayerId === 'string' && typeof (item as PlannedSubstitution).incomingPlayerId === 'string' && validIds.has((item as PlannedSubstitution).outgoingPlayerId) && validIds.has((item as PlannedSubstitution).incomingPlayerId) && Number.isInteger((item as PlannedSubstitution).minute) && (item as PlannedSubstitution).minute >= 0 && (item as PlannedSubstitution).minute <= 120)).slice(0, 3));
+        const validSlots = new Set(formationRows(savedFormation).flat());
+        const restored = state.plannedSubstitutions.flatMap(item => {
+          if (!item || typeof item !== 'object') return [];
+          const savedSub = item as Partial<PlannedSubstitution>;
+          const substitution = {slot: savedSub.slot, outgoingPlayerId: savedSub.outgoingPlayerId, incomingPlayerId: savedSub.incomingPlayerId, minute: savedSub.minute, standing: savedSub.standing ?? -1, card: savedSub.card ?? -1};
+          const validCriteria = goalConditions.some(condition => condition.id === substitution.standing) && redCardConditions.some(condition => condition.id === substitution.card);
+          return typeof substitution.slot === 'string' && validSlots.has(substitution.slot) && typeof substitution.outgoingPlayerId === 'string' && typeof substitution.incomingPlayerId === 'string' && validIds.has(substitution.outgoingPlayerId) && validIds.has(substitution.incomingPlayerId) && typeof substitution.minute === 'number' && Number.isInteger(substitution.minute) && substitution.minute >= 0 && substitution.minute <= 120 && validCriteria ? [substitution as PlannedSubstitution] : [];
+        });
+        setPlannedSubstitutions(restored.slice(0, 3));
       }
       if (typeof state.substitutionMinute === 'string') setSubstitutionMinute(state.substitutionMinute);
       if (typeof state.previewMinute === 'string') setPreviewMinute(state.previewMinute);
@@ -298,8 +323,10 @@ export default function App() {
       if (imported.formation && imported.lineup) {
         setFormation(imported.formation);
         setLineup(imported.lineup);
-        setBehaviors(imported.behaviors ?? {});
+        setBehaviors(sanitizeBehaviors(imported.behaviors, new Set(formationRows(imported.formation).flat())));
         setPlannedSubstitutions(imported.substitutions ?? []);
+        setSubstitutionStanding(-1);
+        setSubstitutionCard(-1);
         setMatchSettings(previous => ({...previous, attitude: imported.attitude ?? previous.attitude}));
         setActiveTab('Alineación');
       } else {
@@ -488,8 +515,13 @@ export default function App() {
               {team && Object.keys(lineup).length > 0 && (plannedSubstitutions.length > 0 || team.players.some(player => !Object.values(lineup).includes(player.id))) ? (
                 <View style={styles.sectorCard}>
                   <Text style={styles.sectionTitle}>Plan de sustituciones</Text>
-                  <Text style={styles.caption}>{hasCompleteOpponentRatings ? 'Añade al plan los cambios que mejoran el índice de cruce contra el rival.' : 'Añade al plan los cambios de banquillo que mejoran los ratings estimados.'} Máximo tres cambios, como en HO.</Text>
+                  <Text style={styles.caption}>{hasCompleteOpponentRatings ? 'Añade al plan los cambios que mejoran el índice de cruce contra el rival.' : 'Añade al plan los cambios de banquillo que mejoran los ratings estimados.'} Máximo tres cambios, con criterios de resultado y expulsión como en HO.</Text>
                   <View style={styles.contextInputRow}><Text style={styles.opponentInputLabel}>Minuto del próximo cambio (0–120)</Text><TextInput accessibilityLabel="Minuto de la sustitución" keyboardType="number-pad" onChangeText={setSubstitutionMinute} style={styles.contextInput} value={substitutionMinute} /></View>
+                  <Text style={styles.caption}>Cada cambio se activa con el minuto y los criterios seleccionados.</Text>
+                  <Text style={styles.sectionTitle}>Marcador</Text>
+                  <View style={styles.choices}>{goalConditions.map(condition => <Choice key={`goal-${condition.id}`} label={condition.label} selected={substitutionStanding === condition.id} onPress={() => setSubstitutionStanding(condition.id)} />)}</View>
+                  <Text style={styles.sectionTitle}>Tarjeta roja</Text>
+                  <View style={styles.choices}>{redCardConditions.map(condition => <Choice key={`card-${condition.id}`} label={condition.label} selected={substitutionCard === condition.id} onPress={() => setSubstitutionCard(condition.id)} />)}</View>
                   {benchSuggestions.length ? benchSuggestions.map(suggestion => {
                     const outgoing = team.players.find(player => player.id === suggestion.outgoingPlayerId)?.name ?? 'Vacío';
                     const incoming = team.players.find(player => player.id === suggestion.incomingPlayerId)?.name ?? 'Jugador';
@@ -497,7 +529,7 @@ export default function App() {
                     const minute = Math.max(0, Math.min(120, Math.round(Number(substitutionMinute.replace(',', '.')) || 0)));
                     const duplicate = plannedSubstitutions.some(item => item.slot === suggestion.slot || item.incomingPlayerId === suggestion.incomingPlayerId || item.outgoingPlayerId === suggestion.incomingPlayerId);
                     const disabled = plannedSubstitutions.length >= 3 || duplicate || !suggestion.outgoingPlayerId;
-                    return <Choice key={`${suggestion.slot}-${suggestion.incomingPlayerId}`} disabled={disabled} label={`${suggestion.slot}: ${outgoing} → ${incoming} · ${gain} · ${minute}' · añadir`} onPress={() => setPlannedSubstitutions(previous => [...previous, {slot: suggestion.slot, outgoingPlayerId: suggestion.outgoingPlayerId!, incomingPlayerId: suggestion.incomingPlayerId, minute}].sort((a, b) => a.minute - b.minute))} />;
+                    return <Choice key={`${suggestion.slot}-${suggestion.incomingPlayerId}`} disabled={disabled} label={`${suggestion.slot}: ${outgoing} → ${incoming} · ${gain} · ${minute}' · añadir`} onPress={() => setPlannedSubstitutions(previous => [...previous, {slot: suggestion.slot, outgoingPlayerId: suggestion.outgoingPlayerId!, incomingPlayerId: suggestion.incomingPlayerId, minute, standing: substitutionStanding, card: substitutionCard}].sort((a, b) => a.minute - b.minute))} />;
                   }) : <Text style={styles.muted}>{hasCompleteOpponentRatings ? 'Ningún cambio del banquillo mejora el índice de cruce.' : 'Ningún cambio de un suplente mejora la suma estimada.'}</Text>}
                   {plannedSubstitutions.length ? <>
                     <Text style={styles.sectionTitle}>Cambios guardados · vista al minuto</Text>
@@ -505,8 +537,11 @@ export default function App() {
                     {plannedSubstitutions.map((item, index) => {
                       const from = team.players.find(player => player.id === item.outgoingPlayerId)?.name ?? 'Jugador';
                       const to = team.players.find(player => player.id === item.incomingPlayerId)?.name ?? 'Jugador';
-                      return <Choice key={`${item.slot}-${item.incomingPlayerId}`} label={`${item.minute}' · ${item.slot}: ${from} → ${to} · quitar`} onPress={() => setPlannedSubstitutions(previous => previous.filter((_, itemIndex) => itemIndex !== index))} />;
+                      const standing = goalConditions.find(condition => condition.id === item.standing)?.label ?? 'Marcador';
+                      const card = redCardConditions.find(condition => condition.id === item.card)?.label ?? 'Expulsión';
+                      return <Choice key={`${item.slot}-${item.incomingPlayerId}`} label={`${item.minute}' · ${item.slot}: ${from} → ${to} · ${standing} · ${card} · quitar`} onPress={() => setPlannedSubstitutions(previous => previous.filter((_, itemIndex) => itemIndex !== index))} />;
                     })}
+                    {plannedSubstitutions.some(item => item.standing !== -1 || item.card !== -1) ? <Text style={styles.caption}>La vista de ratings aplica solo cambios sin condiciones; no predice el marcador ni las expulsiones.</Text> : null}
                     {projectedRatings ? <View style={styles.sectorGrid}>{lineupSectors.map(sector => <View key={`projected-${sector.key}`} style={styles.sectorRow}><Text style={styles.metricName}>{sector.label}</Text><Text style={styles.metricValue}>{projectedRatings[sector.key].toFixed(1)}★</Text></View>)}</View> : null}
                   </> : null}
                 </View>

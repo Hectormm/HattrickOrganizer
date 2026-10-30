@@ -18,7 +18,7 @@ export type Player = {
 };
 
 export type Team = {id: string | null; name: string; players: Player[]};
-export type HrfSubstitution = {slot: string; outgoingPlayerId: string; incomingPlayerId: string; minute: number};
+export type HrfSubstitution = {slot: string; outgoingPlayerId: string; incomingPlayerId: string; minute: number; standing: number; card: number};
 export type HrfImport = {
   team: Team;
   formation?: '3-5-2' | '4-4-2' | '4-5-1' | '5-3-2' | '3-4-3';
@@ -105,7 +105,10 @@ function parseLastLineup(values: Record<string, string>, players: Player[]): Pic
     const prefix = `subst${index}`;
     if (numberOrNull(values[`${prefix}playerorderid`]) === null) break;
     if (numberOrNull(values[`${prefix}ordertype`]) !== 1) continue;
-    if (numberOrNull(values[`${prefix}card`]) !== -1 || numberOrNull(values[`${prefix}standing`]) !== -1) continue;
+    const card = numberOrNull(values[`${prefix}card`]);
+    const standing = numberOrNull(values[`${prefix}standing`]);
+    if (card === null || ![-1, 1, 2, 11, 12, 13, 14, 15, 21, 22, 23, 24, 25].includes(card)) continue;
+    if (standing === null || !Array.from({length: 15}, (_, id) => id - 1).includes(standing)) continue;
     const minute = numberOrNull(values[`${prefix}matchminutecriteria`]);
     const outgoing = numberOrNull(values[`${prefix}playerout`]);
     const incoming = numberOrNull(values[`${prefix}playerin`]);
@@ -114,7 +117,7 @@ function parseLastLineup(values: Record<string, string>, players: Player[]): Pic
     if (!slot || !availablePlayers.has(String(incoming))) continue;
     const newRole = numberOrNull(values[`${prefix}pos`]);
     if (newRole !== null && newRole !== -1 && newRole !== slotRoleIds[slot]) continue;
-    substitutions.push({slot, outgoingPlayerId: String(outgoing), incomingPlayerId: String(incoming), minute});
+    substitutions.push({slot, outgoingPlayerId: String(outgoing), incomingPlayerId: String(incoming), minute, standing, card});
   }
 
   const attitude = values.installning === '1' ? 'Partido de la temporada' : values.installning === '-1' ? 'Jugar relajados' : 'Normal';
