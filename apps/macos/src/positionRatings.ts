@@ -3,6 +3,8 @@ import {Player} from './hrf';
 export type PositionGroup = 'keeper' | 'centralDefender' | 'back' | 'innerMidfielder' | 'winger' | 'forward';
 export type RatingTactic = 'Normal' | 'Ataque por el centro' | 'Ataque por las bandas' | 'Contraataques' | 'Presionar';
 export type PlayerBehavior = 'Normal' | 'Ofensivo' | 'Defensivo' | 'Hacia el centro' | 'Hacia la banda';
+export type MatchWeather = 'Neutro' | 'Soleado' | 'Lluvioso';
+export const matchWeathers: MatchWeather[] = ['Neutro', 'Soleado', 'Lluvioso'];
 export const playerBehaviors: PlayerBehavior[] = ['Normal', 'Ofensivo', 'Defensivo', 'Hacia el centro', 'Hacia la banda'];
 export const positionGroups: {key: PositionGroup; label: string}[] = [
   {key: 'keeper', label: 'Portero'},
@@ -202,6 +204,14 @@ function positionSkillContribution(player: Player, position: Position, ratingSec
   return Array.from(selectedFactors.values()).reduce((sum, factor) => sum + playerStrength(player, factor.skill) * factor.weight, 0);
 }
 
+function weatherFactor(player: Player, weather: MatchWeather): number {
+  if (weather === 'Neutro') return 1;
+  if (player.specialty === 1) return weather === 'Soleado' ? 1.05 : 0.95;
+  if (player.specialty === 2) return 0.95;
+  if (player.specialty === 3) return weather === 'Lluvioso' ? 1.05 : 0.95;
+  return 1;
+}
+
 function experienceContribution(player: Player, factor: number): number {
   const experience = Math.max(0, (player.experience ?? 0) - 1);
   const k = -0.00000725 * experience ** 4 + 0.0005 * experience ** 3 - 0.01336 * experience ** 2 + 0.176 * experience;
@@ -213,12 +223,13 @@ function averageStaminaFactor(player: Player): number {
   return Math.min(1, -0.0033 * stamina ** 2 + 0.085 * stamina + 0.51);
 }
 
-function normalRating(player: Player, position: Position, behavior: PlayerBehavior = 'Normal'): number {
+function normalRating(player: Player, position: Position, behavior: PlayerBehavior = 'Normal', weather: MatchWeather = 'Neutro'): number {
   let sum = 0;
   for (const sector of ratingSectors) {
     const contribution = positionSkillContribution(player, position, sector, behavior);
     let sectorContribution = contribution;
     if (contribution > 0) sectorContribution += experienceContribution(player, sector.experience);
+    sectorContribution *= weatherFactor(player, weather);
     sum += sectorContribution * sector.scale * (sector.key === 'midfield' ? 3 : 1);
   }
   return sum > 0 ? (sum ** 1.2 / 4) * averageStaminaFactor(player) : 0;
@@ -255,7 +266,7 @@ export function getRoleIdForSlot(slot: string, slots: string[]): number {
   return roles[index] ?? 112;
 }
 
-export function estimateLineupSectors(players: Player[], lineup: Record<string, string>, slots: string[], tactic: RatingTactic = 'Normal', behaviors: Record<string, PlayerBehavior> = {}): LineupSectorRatings {
+export function estimateLineupSectors(players: Player[], lineup: Record<string, string>, slots: string[], tactic: RatingTactic = 'Normal', behaviors: Record<string, PlayerBehavior> = {}, weather: MatchWeather = 'Neutro'): LineupSectorRatings {
   const totals: LineupSectorRatings = {
     defenceLeft: 0, defenceCentral: 0, defenceRight: 0, midfield: 0,
     attackLeft: 0, attackCentral: 0, attackRight: 0,
@@ -282,7 +293,7 @@ export function estimateLineupSectors(players: Player[], lineup: Record<string, 
     for (const sector of ratingSectors) {
       const contribution = positionSkillContribution(player, position, sector, behavior);
       if (contribution <= 0) continue;
-      totals[sector.key] += (contribution * overcrowding + experienceContribution(player, sector.experience)) * averageStaminaFactor(player);
+      totals[sector.key] += (contribution * overcrowding + experienceContribution(player, sector.experience)) * weatherFactor(player, weather) * averageStaminaFactor(player);
     }
   }
 
@@ -297,14 +308,14 @@ export function estimateLineupSectors(players: Player[], lineup: Record<string, 
   return totals;
 }
 
-export function getPlayerPositionEstimate(player: Player, group: PositionGroup): number {
+export function getPlayerPositionEstimate(player: Player, group: PositionGroup, weather: MatchWeather = 'Neutro'): number {
   const roles = new Set(roleIdsByGroup[group]);
-  return positions.filter(position => roles.has(position.role)).reduce((best, position) => Math.max(best, normalRating(player, position)), 0);
+  return positions.filter(position => roles.has(position.role)).reduce((best, position) => Math.max(best, normalRating(player, position, 'Normal', weather)), 0);
 }
 
-export function getPlayerRoleEstimate(player: Player, roleId: number, behavior: PlayerBehavior = 'Normal'): number {
+export function getPlayerRoleEstimate(player: Player, roleId: number, behavior: PlayerBehavior = 'Normal', weather: MatchWeather = 'Neutro'): number {
   const position = positions.find(candidate => candidate.role === roleId);
-  return position ? normalRating(player, position, behavior) : 0;
+  return position ? normalRating(player, position, behavior, weather) : 0;
 }
 
 function matchStaminaFactor(player: Player, minute: number, pressing: boolean): number {

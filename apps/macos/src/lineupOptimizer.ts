@@ -1,5 +1,5 @@
 import {Player} from './hrf';
-import {estimateLineupSectors, getBehaviorsForSlot, getPlayerRoleEstimate, getRoleIdForSlot, LineupSectorRatings, OpponentSectorRatings, PlayerBehavior, RatingTactic} from './positionRatings';
+import {estimateLineupSectors, getBehaviorsForSlot, getPlayerRoleEstimate, getRoleIdForSlot, LineupSectorRatings, OpponentSectorRatings, MatchWeather, PlayerBehavior, RatingTactic} from './positionRatings';
 
 type LineupResult = {assignments: Record<string, string>; behaviors: Record<string, PlayerBehavior>; totalRating: number; matchupScore: number | null};
 export type BenchSuggestion = {slot: string; outgoingPlayerId: string | null; incomingPlayerId: string; gain: number; matchupBased: boolean};
@@ -37,17 +37,17 @@ function scoreLineup(ratings: LineupSectorRatings, opponentRatings?: OpponentSec
   return weightedShare / totalWeight;
 }
 
-export function getPlayerSlotEstimate(player: Player, slot: string, slots: string[], behaviors: Record<string, PlayerBehavior> = {}): number {
-  return getPlayerRoleEstimate(player, getRoleIdForSlot(slot, slots), behaviors[slot] ?? 'Normal');
+export function getPlayerSlotEstimate(player: Player, slot: string, slots: string[], behaviors: Record<string, PlayerBehavior> = {}, weather: MatchWeather = 'Neutro'): number {
+  return getPlayerRoleEstimate(player, getRoleIdForSlot(slot, slots), behaviors[slot] ?? 'Normal', weather);
 }
 
-export function getBenchSuggestions(players: Player[], lineup: Record<string, string>, slots: string[], tactic: RatingTactic, opponentRatings?: OpponentSectorRatings | null, behaviors: Record<string, PlayerBehavior> = {}): BenchSuggestion[] {
+export function getBenchSuggestions(players: Player[], lineup: Record<string, string>, slots: string[], tactic: RatingTactic, opponentRatings?: OpponentSectorRatings | null, behaviors: Record<string, PlayerBehavior> = {}, weather: MatchWeather = 'Neutro'): BenchSuggestion[] {
   const assignedIds = new Set(Object.values(lineup));
   const bench = players.filter(player => !assignedIds.has(player.id));
   if (!bench.length) return [];
 
   const sectorScore = (candidate: Record<string, string>) =>
-    scoreLineup(estimateLineupSectors(players, candidate, slots, tactic, behaviors), opponentRatings);
+    scoreLineup(estimateLineupSectors(players, candidate, slots, tactic, behaviors, weather), opponentRatings);
   const currentScore = sectorScore(lineup);
   const candidates = slots.flatMap(slot => bench.flatMap(player => {
     const outgoingPlayerId = lineup[slot] ?? null;
@@ -67,13 +67,13 @@ export function getBenchSuggestions(players: Player[], lineup: Record<string, st
 }
 
 /** Maximum-weight one-to-one assignment using the Hungarian algorithm. */
-export function optimizeLineup(players: Player[], slots: string[], tactic: RatingTactic = 'Normal', opponentRatings?: OpponentSectorRatings | null, behaviors: Record<string, PlayerBehavior> = {}): LineupResult {
+export function optimizeLineup(players: Player[], slots: string[], tactic: RatingTactic = 'Normal', opponentRatings?: OpponentSectorRatings | null, behaviors: Record<string, PlayerBehavior> = {}, weather: MatchWeather = 'Neutro'): LineupResult {
   if (!players.length || !slots.length) return {assignments: {}, behaviors, totalRating: 0, matchupScore: null};
   const rows = slots.length;
   const realColumns = players.length;
   const columns = Math.max(rows, realColumns);
   const weights = slots.map(slot => [
-    ...players.map(player => getPlayerSlotEstimate(player, slot, slots, behaviors)),
+    ...players.map(player => getPlayerSlotEstimate(player, slot, slots, behaviors, weather)),
     ...Array.from({length: columns - realColumns}, () => 0),
   ]);
 
@@ -131,7 +131,7 @@ export function optimizeLineup(players: Player[], slots: string[], tactic: Ratin
   // Refine the individual-rating assignment against the seven team-sector ratings.
   const assignedIds = new Set(Object.values(assignments));
   const bench = players.filter(player => !assignedIds.has(player.id));
-  const sectorScore = (candidate: Record<string, string>) => scoreLineup(estimateLineupSectors(players, candidate, slots, tactic, behaviors), opponentRatings);
+  const sectorScore = (candidate: Record<string, string>) => scoreLineup(estimateLineupSectors(players, candidate, slots, tactic, behaviors, weather), opponentRatings);
   let bestScore = sectorScore(assignments);
   let improved = true;
   while (improved) {
@@ -188,10 +188,10 @@ export function optimizeLineup(players: Player[], slots: string[], tactic: Ratin
     for (const slot of slots) {
       const currentBehavior = optimizedBehaviors[slot] ?? 'Normal';
       let bestBehavior = currentBehavior;
-      let bestOrderScore = scoreLineup(estimateLineupSectors(players, assignments, slots, tactic, optimizedBehaviors), opponentRatings);
+      let bestOrderScore = scoreLineup(estimateLineupSectors(players, assignments, slots, tactic, optimizedBehaviors, weather), opponentRatings);
       for (const behavior of getBehaviorsForSlot(slot, slots)) {
         optimizedBehaviors[slot] = behavior;
-        const score = scoreLineup(estimateLineupSectors(players, assignments, slots, tactic, optimizedBehaviors), opponentRatings);
+        const score = scoreLineup(estimateLineupSectors(players, assignments, slots, tactic, optimizedBehaviors, weather), opponentRatings);
         if (score > bestOrderScore + 1e-6) {
           bestOrderScore = score;
           bestBehavior = behavior;
@@ -201,7 +201,7 @@ export function optimizeLineup(players: Player[], slots: string[], tactic: Ratin
       if (bestBehavior !== currentBehavior) ordersImproved = true;
     }
   }
-  const ratings = estimateLineupSectors(players, assignments, slots, tactic, optimizedBehaviors);
+  const ratings = estimateLineupSectors(players, assignments, slots, tactic, optimizedBehaviors, weather);
   const totalRating = Object.values(ratings).reduce((sum, rating) => sum + rating, 0);
   const matchupScore = scoreLineup(ratings, opponentRatings);
   return {assignments, behaviors: optimizedBehaviors, totalRating, matchupScore: hasCompleteOpponentRatings(opponentRatings) ? matchupScore : null};

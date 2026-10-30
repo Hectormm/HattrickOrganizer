@@ -1,7 +1,7 @@
 import React, {useEffect, useMemo, useState} from 'react';
 import {NativeModules, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, View} from 'react-native';
 import {parseHrf, Player, Team} from './hrf';
-import {estimateLineupSectors, estimateTacticLevel, getBehaviorsForSlot, getPlayerPositionEstimate, OpponentSectorRatings, PlayerBehavior, positionGroups, RatingTactic} from './positionRatings';
+import {estimateLineupSectors, estimateTacticLevel, getBehaviorsForSlot, getPlayerPositionEstimate, MatchWeather, matchWeathers, OpponentSectorRatings, PlayerBehavior, positionGroups, RatingTactic} from './positionRatings';
 import {getBenchSuggestions, getPlayerSlotEstimate, optimizeLineup} from './lineupOptimizer';
 
 type Tab = 'Plantilla' | 'Alineación' | 'Team Analyzer';
@@ -127,6 +127,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<Tab>('Alineación');
   const [formation, setFormation] = useState<Formation>('3-5-2');
   const [tactic, setTactic] = useState<Tactic>('Normal');
+  const [weather, setWeather] = useState<MatchWeather>('Neutro');
   const [team, setTeam] = useState<Team | null>(null);
   const [opponentTeam, setOpponentTeam] = useState<Team | null>(null);
   const [opponentFormation, setOpponentFormation] = useState<Formation>('3-5-2');
@@ -145,11 +146,11 @@ export default function App() {
   const slots = useMemo(() => rows.flat(), [rows]);
   const opponentRows = useMemo(() => formationRows(opponentFormation), [opponentFormation]);
   const opponentSlots = useMemo(() => opponentRows.flat(), [opponentRows]);
-  const opponentLineupResult = useMemo(() => opponentTeam ? optimizeLineup(opponentTeam.players, opponentSlots, opponentTactic) : null, [opponentTeam, opponentSlots, opponentTactic]);
+  const opponentLineupResult = useMemo(() => opponentTeam ? optimizeLineup(opponentTeam.players, opponentSlots, opponentTactic, null, {}, weather) : null, [opponentTeam, opponentSlots, opponentTactic, weather]);
   const opponentSectorRatings = useMemo(() => opponentTeam && opponentLineupResult
-    ? estimateLineupSectors(opponentTeam.players, opponentLineupResult.assignments, opponentSlots, opponentTactic, opponentLineupResult.behaviors)
-    : null, [opponentTeam, opponentLineupResult, opponentSlots, opponentTactic]);
-  const sectorRatings = useMemo(() => team ? estimateLineupSectors(team.players, lineup, slots, tactic, behaviors) : null, [team, lineup, slots, tactic, behaviors]);
+    ? estimateLineupSectors(opponentTeam.players, opponentLineupResult.assignments, opponentSlots, opponentTactic, opponentLineupResult.behaviors, weather)
+    : null, [opponentTeam, opponentLineupResult, opponentSlots, opponentTactic, weather]);
+  const sectorRatings = useMemo(() => team ? estimateLineupSectors(team.players, lineup, slots, tactic, behaviors, weather) : null, [team, lineup, slots, tactic, behaviors, weather]);
   const tacticLevel = useMemo(() => team ? estimateTacticLevel(team.players, lineup, slots, tactic) : null, [team, lineup, slots, tactic]);
   const parsedOpponentRatings = useMemo(() => Object.fromEntries(Object.keys(emptyOpponentRatings).map(key => {
     const manualRating = parseRatingInput(opponentRatings[key as RatingKey]);
@@ -157,16 +158,16 @@ export default function App() {
   })) as OpponentSectorRatings, [opponentRatings, opponentSectorRatings]);
   const hasCompleteOpponentRatings = Object.keys(emptyOpponentRatings).every(key => typeof parsedOpponentRatings[key as RatingKey] === 'number');
   const hasAnyOpponentRatings = Object.values(parsedOpponentRatings).some(value => typeof value === 'number');
-  const benchSuggestions = useMemo(() => team ? getBenchSuggestions(team.players, lineup, slots, tactic, hasCompleteOpponentRatings ? parsedOpponentRatings : null, behaviors) : [], [team, lineup, slots, tactic, hasCompleteOpponentRatings, parsedOpponentRatings, behaviors]);
+  const benchSuggestions = useMemo(() => team ? getBenchSuggestions(team.players, lineup, slots, tactic, hasCompleteOpponentRatings ? parsedOpponentRatings : null, behaviors, weather) : [], [team, lineup, slots, tactic, hasCompleteOpponentRatings, parsedOpponentRatings, behaviors, weather]);
   const formationRecommendations = useMemo(() => {
     if (!team || !hasCompleteOpponentRatings || activeTab !== 'Alineación') return [];
     return formations.map(candidateFormation => {
       const candidateSlots = formationRows(candidateFormation).flat();
-      const result = optimizeLineup(team.players, candidateSlots, tactic, parsedOpponentRatings, behaviors);
+      const result = optimizeLineup(team.players, candidateSlots, tactic, parsedOpponentRatings, behaviors, weather);
       return {formation: candidateFormation, slots: candidateSlots, result};
     }).filter(recommendation => recommendation.result.matchupScore !== null)
       .sort((a, b) => (b.result.matchupScore ?? 0) - (a.result.matchupScore ?? 0));
-  }, [team, hasCompleteOpponentRatings, activeTab, tactic, parsedOpponentRatings, behaviors]);
+  }, [team, hasCompleteOpponentRatings, activeTab, tactic, parsedOpponentRatings, behaviors, weather]);
 
   useEffect(() => {
     const storage = NativeModules.HOStorage;
@@ -178,11 +179,12 @@ export default function App() {
     let mounted = true;
     storage.loadState().then((saved: unknown) => {
       if (!mounted || !saved || typeof saved !== 'object') return;
-      const state = saved as {team?: unknown; formation?: unknown; tactic?: unknown; lineup?: unknown; opponentTeam?: unknown; opponentFormation?: unknown; opponentTactic?: unknown; opponentName?: unknown; opponentRatings?: unknown; behaviors?: unknown};
+      const state = saved as {team?: unknown; formation?: unknown; tactic?: unknown; lineup?: unknown; opponentTeam?: unknown; opponentFormation?: unknown; opponentTactic?: unknown; opponentName?: unknown; opponentRatings?: unknown; behaviors?: unknown; weather?: unknown};
       const savedTeam = isTeam(state.team) ? state.team : null;
       const savedOpponentTeam = isTeam(state.opponentTeam) ? state.opponentTeam : null;
       const savedFormation = formations.includes(state.formation as Formation) ? state.formation as Formation : '3-5-2';
       const savedTactic = tactics.includes(state.tactic as Tactic) ? state.tactic as Tactic : 'Normal';
+      const savedWeather = matchWeathers.includes(state.weather as MatchWeather) ? state.weather as MatchWeather : 'Neutro';
       const savedOpponentFormation = formations.includes(state.opponentFormation as Formation) ? state.opponentFormation as Formation : '3-5-2';
       const savedOpponentTactic = tactics.includes(state.opponentTactic as Tactic) ? state.opponentTactic as Tactic : 'Normal';
 
@@ -194,6 +196,7 @@ export default function App() {
       setOpponentRatings(readOpponentRatings(state.opponentRatings));
       setFormation(savedFormation);
       setTactic(savedTactic);
+      setWeather(savedWeather);
       setBehaviors(sanitizeBehaviors(state.behaviors, new Set(formationRows(savedFormation).flat())));
       if (savedTeam && isLineup(state.lineup)) {
         const playerIds = new Set(savedTeam.players.map(player => player.id));
@@ -211,10 +214,10 @@ export default function App() {
 
   useEffect(() => {
     if (!storageReady || !NativeModules.HOStorage) return;
-    NativeModules.HOStorage.saveState({team, lineup, behaviors, formation, tactic, opponentTeam, opponentFormation, opponentTactic, opponentName, opponentRatings}).catch((error: unknown) => {
+    NativeModules.HOStorage.saveState({team, lineup, behaviors, formation, tactic, weather, opponentTeam, opponentFormation, opponentTactic, opponentName, opponentRatings}).catch((error: unknown) => {
       console.warn('No se pudieron guardar los datos de HO.', error);
     });
-  }, [storageReady, team, lineup, behaviors, formation, tactic, opponentTeam, opponentFormation, opponentTactic, opponentName, opponentRatings]);
+  }, [storageReady, team, lineup, behaviors, formation, tactic, weather, opponentTeam, opponentFormation, opponentTactic, opponentName, opponentRatings]);
 
   const chooseFormation = (next: Formation) => {
     setFormation(next);
@@ -280,7 +283,7 @@ export default function App() {
   };
   const applyBestLineup = () => {
     if (!team) return;
-    const result = optimizeLineup(team.players, slots, tactic, hasCompleteOpponentRatings ? parsedOpponentRatings : null, behaviors);
+    const result = optimizeLineup(team.players, slots, tactic, hasCompleteOpponentRatings ? parsedOpponentRatings : null, behaviors, weather);
     setLineup(result.assignments);
     setBehaviors(result.behaviors);
     setActiveSlot(null);
@@ -416,11 +419,11 @@ export default function App() {
               {activeSlot ? (
                 <View style={styles.picker}>
                   <Text style={styles.sectionTitle}>Orden individual · {activeSlot}</Text>
-                  <Text style={styles.caption}>La recomendación de once también optimiza estas órdenes con los ratings actuales.</Text>
+                  <Text style={styles.caption}>La recomendación optimiza las órdenes según la táctica, el clima y los ratings actuales.</Text>
                   <View style={styles.choices}>{getBehaviorsForSlot(activeSlot, slots).map(behavior => <Choice key={behavior} label={behavior} selected={(behaviors[activeSlot] ?? 'Normal') === behavior} onPress={() => setBehaviors(previous => ({...previous, [activeSlot]: behavior}))} />)}</View>
                   <Text style={styles.sectionTitle}>Elige jugador · {activeSlot}</Text>
                   {team?.players
-                    .map(player => ({player, rating: getPlayerSlotEstimate(player, activeSlot, slots, behaviors)}))
+                    .map(player => ({player, rating: getPlayerSlotEstimate(player, activeSlot, slots, behaviors, weather)}))
                     .sort((a, b) => b.rating - a.rating)
                     .map(({player, rating}) => {
                       const assignedSlot = Object.entries(lineup).find(([, playerId]) => playerId === player.id)?.[0];
@@ -436,7 +439,8 @@ export default function App() {
               <Text style={styles.cardTitle}>Órdenes del equipo</Text>
               <Text style={styles.muted}>Selecciona un planteamiento para este partido.</Text>
               <View style={styles.choices}>{tactics.map(item => <Choice key={item} label={item} selected={tactic === item} onPress={() => setTactic(item)} />)}</View>
-              <View style={styles.summary}><Text style={styles.summaryLabel}>Planteamiento actual</Text><Text style={styles.summaryValue}>{formation} · {tactic}</Text></View>
+              <Text style={styles.sectionTitle}>Clima del partido</Text><View style={styles.choices}>{matchWeathers.map(item => <Choice key={item} label={item} selected={weather === item} onPress={() => setWeather(item)} />)}</View>
+              <View style={styles.summary}><Text style={styles.summaryLabel}>Planteamiento actual</Text><Text style={styles.summaryValue}>{formation} · {tactic} · {weather}</Text></View>
             </View>
           </>
         ) : null}
@@ -444,7 +448,7 @@ export default function App() {
           <>
             <View style={styles.card}>
               <Text style={styles.cardTitle}>Comparativa de ratings</Text>
-              <Text style={styles.muted}>{team ? `${team.name} · alineación ${formation} · ${tactic}` : 'Importa tu HRF y configura una alineación para calcular tus ratings.'}</Text>
+              <Text style={styles.muted}>{team ? `${team.name} · alineación ${formation} · ${tactic} · ${weather}` : 'Importa tu HRF y configura una alineación para calcular tus ratings.'}</Text>
               <Choice label={opponentTeam ? 'Cambiar HRF del rival…' : 'Importar HRF del rival…'} onPress={openOpponentHrfFile} />
               {opponentImportMessage ? <Text style={styles.importMessage}>{opponentImportMessage}</Text> : null}
               {opponentTeam ? (
@@ -539,7 +543,7 @@ export default function App() {
                   <View key={group.key} style={styles.rankingGroup}>
                     <Text style={styles.metricName}>{group.label}</Text>
                     {team.players
-                      .map(player => ({player, rating: getPlayerPositionEstimate(player, group.key)}))
+                      .map(player => ({player, rating: getPlayerPositionEstimate(player, group.key, weather)}))
                       .sort((a, b) => b.rating - a.rating)
                       .slice(0, 3)
                       .map(({player, rating}, index) => (
