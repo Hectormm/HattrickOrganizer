@@ -1,7 +1,7 @@
 import React, {useEffect, useMemo, useState} from 'react';
 import {NativeModules, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, View} from 'react-native';
 import {parseHrf, Player, Team} from './hrf';
-import {estimateLineupSectors, estimateTacticLevel, getPlayerPositionEstimate, OpponentSectorRatings, positionGroups, RatingTactic} from './positionRatings';
+import {estimateLineupSectors, estimateTacticLevel, getBehaviorsForSlot, getPlayerPositionEstimate, OpponentSectorRatings, PlayerBehavior, positionGroups, RatingTactic} from './positionRatings';
 import {getBenchSuggestions, getPlayerSlotEstimate, optimizeLineup} from './lineupOptimizer';
 
 type Tab = 'Plantilla' | 'Alineación' | 'Team Analyzer';
@@ -112,6 +112,12 @@ function sanitizeLineup(value: unknown, allowedSlots: Set<string>, allowedPlayer
   }));
 }
 
+function sanitizeBehaviors(value: unknown, allowedSlots: Set<string>): Record<string, PlayerBehavior> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  return Object.fromEntries(Object.entries(value).filter(([slot, behavior]) =>
+    allowedSlots.has(slot) && getBehaviorsForSlot(slot, [...allowedSlots]).includes(behavior as PlayerBehavior)) as [string, PlayerBehavior][]);
+}
+
 export default function App() {
   const [activeTab, setActiveTab] = useState<Tab>('Alineación');
   const [formation, setFormation] = useState<Formation>('3-5-2');
@@ -127,6 +133,7 @@ export default function App() {
   const [opponentImportMessage, setOpponentImportMessage] = useState('');
   const [lineupMessage, setLineupMessage] = useState('');
   const [lineup, setLineup] = useState<Record<string, string>>({});
+  const [behaviors, setBehaviors] = useState<Record<string, PlayerBehavior>>({});
   const [activeSlot, setActiveSlot] = useState<string | null>(null);
   const [storageReady, setStorageReady] = useState(false);
   const rows = useMemo(() => formationRows(formation), [formation]);
@@ -135,9 +142,9 @@ export default function App() {
   const opponentSlots = useMemo(() => opponentRows.flat(), [opponentRows]);
   const opponentLineupResult = useMemo(() => opponentTeam ? optimizeLineup(opponentTeam.players, opponentSlots, opponentTactic) : null, [opponentTeam, opponentSlots, opponentTactic]);
   const opponentSectorRatings = useMemo(() => opponentTeam && opponentLineupResult
-    ? estimateLineupSectors(opponentTeam.players, opponentLineupResult.assignments, opponentSlots, opponentTactic)
+    ? estimateLineupSectors(opponentTeam.players, opponentLineupResult.assignments, opponentSlots, opponentTactic, opponentLineupResult.behaviors)
     : null, [opponentTeam, opponentLineupResult, opponentSlots, opponentTactic]);
-  const sectorRatings = useMemo(() => team ? estimateLineupSectors(team.players, lineup, slots, tactic) : null, [team, lineup, slots, tactic]);
+  const sectorRatings = useMemo(() => team ? estimateLineupSectors(team.players, lineup, slots, tactic, behaviors) : null, [team, lineup, slots, tactic, behaviors]);
   const tacticLevel = useMemo(() => team ? estimateTacticLevel(team.players, lineup, slots, tactic) : null, [team, lineup, slots, tactic]);
   const parsedOpponentRatings = useMemo(() => Object.fromEntries(Object.keys(emptyOpponentRatings).map(key => {
     const manualRating = parseRatingInput(opponentRatings[key as RatingKey]);
@@ -145,16 +152,16 @@ export default function App() {
   })) as OpponentSectorRatings, [opponentRatings, opponentSectorRatings]);
   const hasCompleteOpponentRatings = Object.keys(emptyOpponentRatings).every(key => typeof parsedOpponentRatings[key as RatingKey] === 'number');
   const hasAnyOpponentRatings = Object.values(parsedOpponentRatings).some(value => typeof value === 'number');
-  const benchSuggestions = useMemo(() => team ? getBenchSuggestions(team.players, lineup, slots, tactic, hasCompleteOpponentRatings ? parsedOpponentRatings : null) : [], [team, lineup, slots, tactic, hasCompleteOpponentRatings, parsedOpponentRatings]);
+  const benchSuggestions = useMemo(() => team ? getBenchSuggestions(team.players, lineup, slots, tactic, hasCompleteOpponentRatings ? parsedOpponentRatings : null, behaviors) : [], [team, lineup, slots, tactic, hasCompleteOpponentRatings, parsedOpponentRatings, behaviors]);
   const formationRecommendations = useMemo(() => {
     if (!team || !hasCompleteOpponentRatings || activeTab !== 'Alineación') return [];
     return formations.map(candidateFormation => {
       const candidateSlots = formationRows(candidateFormation).flat();
-      const result = optimizeLineup(team.players, candidateSlots, tactic, parsedOpponentRatings);
+      const result = optimizeLineup(team.players, candidateSlots, tactic, parsedOpponentRatings, behaviors);
       return {formation: candidateFormation, slots: candidateSlots, result};
     }).filter(recommendation => recommendation.result.matchupScore !== null)
       .sort((a, b) => (b.result.matchupScore ?? 0) - (a.result.matchupScore ?? 0));
-  }, [team, hasCompleteOpponentRatings, activeTab, tactic, parsedOpponentRatings]);
+  }, [team, hasCompleteOpponentRatings, activeTab, tactic, parsedOpponentRatings, behaviors]);
 
   useEffect(() => {
     const storage = NativeModules.HOStorage;
@@ -166,7 +173,7 @@ export default function App() {
     let mounted = true;
     storage.loadState().then((saved: unknown) => {
       if (!mounted || !saved || typeof saved !== 'object') return;
-      const state = saved as {team?: unknown; formation?: unknown; tactic?: unknown; lineup?: unknown; opponentTeam?: unknown; opponentFormation?: unknown; opponentTactic?: unknown; opponentName?: unknown; opponentRatings?: unknown};
+      const state = saved as {team?: unknown; formation?: unknown; tactic?: unknown; lineup?: unknown; opponentTeam?: unknown; opponentFormation?: unknown; opponentTactic?: unknown; opponentName?: unknown; opponentRatings?: unknown; behaviors?: unknown};
       const savedTeam = isTeam(state.team) ? state.team : null;
       const savedOpponentTeam = isTeam(state.opponentTeam) ? state.opponentTeam : null;
       const savedFormation = formations.includes(state.formation as Formation) ? state.formation as Formation : '3-5-2';
@@ -182,6 +189,7 @@ export default function App() {
       setOpponentRatings(readOpponentRatings(state.opponentRatings));
       setFormation(savedFormation);
       setTactic(savedTactic);
+      setBehaviors(sanitizeBehaviors(state.behaviors, new Set(formationRows(savedFormation).flat())));
       if (savedTeam && isLineup(state.lineup)) {
         const playerIds = new Set(savedTeam.players.map(player => player.id));
         const slotsForFormation = new Set(formationRows(savedFormation).flat());
@@ -198,15 +206,16 @@ export default function App() {
 
   useEffect(() => {
     if (!storageReady || !NativeModules.HOStorage) return;
-    NativeModules.HOStorage.saveState({team, lineup, formation, tactic, opponentTeam, opponentFormation, opponentTactic, opponentName, opponentRatings}).catch((error: unknown) => {
+    NativeModules.HOStorage.saveState({team, lineup, behaviors, formation, tactic, opponentTeam, opponentFormation, opponentTactic, opponentName, opponentRatings}).catch((error: unknown) => {
       console.warn('No se pudieron guardar los datos de HO.', error);
     });
-  }, [storageReady, team, lineup, formation, tactic, opponentTeam, opponentFormation, opponentTactic, opponentName, opponentRatings]);
+  }, [storageReady, team, lineup, behaviors, formation, tactic, opponentTeam, opponentFormation, opponentTactic, opponentName, opponentRatings]);
 
   const chooseFormation = (next: Formation) => {
     setFormation(next);
     const availableSlots = new Set(formationRows(next).flat());
     setLineup(previous => Object.fromEntries(Object.entries(previous).filter(([slot]) => availableSlots.has(slot))));
+    setBehaviors(previous => Object.fromEntries(Object.entries(previous).filter(([slot]) => availableSlots.has(slot))));
     setActiveSlot(null);
   };
 
@@ -215,6 +224,7 @@ export default function App() {
       const imported = parseHrf(source);
       setTeam(imported);
       setLineup({});
+      setBehaviors({});
       setActiveSlot(null);
       setImportMessage(`${imported.players.length} jugadores importados · ${imported.name}`);
     } catch (error) {
@@ -265,8 +275,9 @@ export default function App() {
   };
   const applyBestLineup = () => {
     if (!team) return;
-    const result = optimizeLineup(team.players, slots, tactic, hasCompleteOpponentRatings ? parsedOpponentRatings : null);
+    const result = optimizeLineup(team.players, slots, tactic, hasCompleteOpponentRatings ? parsedOpponentRatings : null, behaviors);
     setLineup(result.assignments);
+    setBehaviors(result.behaviors);
     setActiveSlot(null);
     const coverage = `${Object.keys(result.assignments).length}/${slots.length} puestos cubiertos`;
     setLineupMessage(result.matchupScore !== null
@@ -276,6 +287,7 @@ export default function App() {
   const applyFormationRecommendation = (recommendation: (typeof formationRecommendations)[number]) => {
     setFormation(recommendation.formation);
     setLineup(recommendation.result.assignments);
+    setBehaviors(recommendation.result.behaviors);
     setActiveSlot(null);
     const score = recommendation.result.matchupScore;
     const coverage = `${Object.keys(recommendation.result.assignments).length}/${recommendation.slots.length} puestos cubiertos`;
@@ -352,6 +364,7 @@ export default function App() {
                       <Text accessibilityRole="button" key={slot} onPress={() => {setActiveSlot(slot); setActiveTab('Alineación');}} style={[styles.position, activeSlot === slot && styles.positionActive]}>
                         <Text style={styles.positionDot}>●</Text>
                         <Text style={styles.positionText}>{assignedName(slot) ?? slot}</Text>
+                        {behaviors[slot] && behaviors[slot] !== 'Normal' ? <Text style={styles.positionOrder}>{behaviors[slot]}</Text> : null}
                       </Text>
                     ))}
                   </View>
@@ -397,15 +410,19 @@ export default function App() {
               ) : null}
               {activeSlot ? (
                 <View style={styles.picker}>
+                  <Text style={styles.sectionTitle}>Orden individual · {activeSlot}</Text>
+                  <Text style={styles.caption}>La recomendación de once también optimiza estas órdenes con los ratings actuales.</Text>
+                  <View style={styles.choices}>{getBehaviorsForSlot(activeSlot, slots).map(behavior => <Choice key={behavior} label={behavior} selected={(behaviors[activeSlot] ?? 'Normal') === behavior} onPress={() => setBehaviors(previous => ({...previous, [activeSlot]: behavior}))} />)}</View>
                   <Text style={styles.sectionTitle}>Elige jugador · {activeSlot}</Text>
                   {team?.players
-                    .map(player => ({player, rating: getPlayerSlotEstimate(player, activeSlot, slots)}))
+                    .map(player => ({player, rating: getPlayerSlotEstimate(player, activeSlot, slots, behaviors)}))
                     .sort((a, b) => b.rating - a.rating)
                     .map(({player, rating}) => {
                       const assignedSlot = Object.entries(lineup).find(([, playerId]) => playerId === player.id)?.[0];
                       const transfer = assignedSlot && assignedSlot !== activeSlot ? ` · intercambiar desde ${assignedSlot}` : '';
                       return <Choice key={player.id} label={`${player.name} · ${rating.toFixed(1)}★ · DEF ${player.defending ?? '—'} · JUG ${player.playmaking ?? '—'} · ANO ${player.scoring ?? '—'}${transfer}`} selected={lineup[activeSlot] === player.id} onPress={() => {assignPlayerToSlot(activeSlot, player.id); setActiveSlot(null);}} />;
                     })}
+                  {!team ? <Text style={styles.muted}>Importa tu HRF desde Plantilla para elegir jugadores.</Text> : null}
                   <Choice label="Dejar posición vacía" onPress={() => {setLineup(previous => {const next = {...previous}; delete next[activeSlot]; return next;}); setActiveSlot(null);}} />
                 </View>
               ) : null}
@@ -558,6 +575,7 @@ const styles = StyleSheet.create({
   positionActive: {backgroundColor: '#d4e8db'},
   positionDot: {color: '#267550', fontSize: 17},
   positionText: {marginTop: 3, color: '#35584a', fontSize: 11, textAlign: 'center'},
+  positionOrder: {marginTop: 2, color: '#1c6b83', fontSize: 9, textAlign: 'center'},
   caption: {marginTop: 9, color: '#758995', fontSize: 12},
   sectorCard: {marginTop: 14, padding: 14, borderRadius: 10, backgroundColor: '#f6f8f9'},
   opponentTeamCard: {marginTop: 14, padding: 14, borderRadius: 10, backgroundColor: '#f6f8f9'},

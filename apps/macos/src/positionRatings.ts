@@ -2,6 +2,8 @@ import {Player} from './hrf';
 
 export type PositionGroup = 'keeper' | 'centralDefender' | 'back' | 'innerMidfielder' | 'winger' | 'forward';
 export type RatingTactic = 'Normal' | 'Ataque por el centro' | 'Ataque por las bandas' | 'Contraataques' | 'Presionar';
+export type PlayerBehavior = 'Normal' | 'Ofensivo' | 'Defensivo' | 'Hacia el centro' | 'Hacia la banda';
+export const playerBehaviors: PlayerBehavior[] = ['Normal', 'Ofensivo', 'Defensivo', 'Hacia el centro', 'Hacia la banda'];
 export const positionGroups: {key: PositionGroup; label: string}[] = [
   {key: 'keeper', label: 'Portero'},
   {key: 'centralDefender', label: 'Defensa central'},
@@ -15,52 +17,123 @@ type Sector = 'goal' | 'centralDefence' | 'back' | 'innerMidfield' | 'wing' | 'f
 type RatingSector = 'defenceLeft' | 'defenceCentral' | 'defenceRight' | 'midfield' | 'attackLeft' | 'attackCentral' | 'attackRight';
 type ContributionSet = 'sideDefence' | 'centralDefence' | 'midfield' | 'sideAttack' | 'centralAttack';
 type Side = 'left' | 'middle' | 'right';
-type SideRestriction = 'none' | 'thisSide' | 'middleOnly';
+type SideRestriction = 'none' | 'thisSide' | 'middleOnly' | 'oppositeSide';
 type Skill = 'keeper' | 'defending' | 'playmaking' | 'passing' | 'winger' | 'scoring' | 'stamina' | 'experience';
 
-type Factor = [ContributionSet, Skill, Sector, SideRestriction, number];
+type Factor = [ContributionSet, Skill, Sector, SideRestriction, PlayerBehavior, number];
 type Position = {role: number; sector: Sector; side: Side};
 export type LineupSectorRatings = Record<RatingSector, number>;
 export type OpponentSectorRatings = Partial<Record<keyof LineupSectorRatings, number | null>>;
 
-// Normal-behaviour factors ported from RatingPredictionModel.initRatingContributionParameterMap.
+// Contribution factors for all five position behaviours, ported from RatingPredictionModel.initRatingContributionParameterMap.
 const factors: Factor[] = [
-  ['sideDefence', 'keeper', 'goal', 'none', 0.61],
-  ['sideDefence', 'defending', 'goal', 'none', 0.25],
-  ['sideDefence', 'defending', 'centralDefence', 'thisSide', 0.52],
-  ['sideDefence', 'defending', 'centralDefence', 'middleOnly', 0.26],
-  ['sideDefence', 'defending', 'back', 'thisSide', 0.92],
-  ['sideDefence', 'defending', 'innerMidfield', 'thisSide', 0.19],
-  ['sideDefence', 'defending', 'innerMidfield', 'middleOnly', 0.095],
-  ['sideDefence', 'defending', 'wing', 'thisSide', 0.35],
-
-  ['centralDefence', 'keeper', 'goal', 'none', 0.87],
-  ['centralDefence', 'defending', 'goal', 'none', 0.35],
-  ['centralDefence', 'defending', 'centralDefence', 'none', 1],
-  ['centralDefence', 'defending', 'back', 'none', 0.38],
-  ['centralDefence', 'defending', 'innerMidfield', 'none', 0.4],
-  ['centralDefence', 'defending', 'wing', 'none', 0.2],
-
-  ['midfield', 'playmaking', 'centralDefence', 'none', 0.25],
-  ['midfield', 'playmaking', 'back', 'none', 0.15],
-  ['midfield', 'playmaking', 'innerMidfield', 'none', 1],
-  ['midfield', 'playmaking', 'wing', 'none', 0.45],
-  ['midfield', 'playmaking', 'forward', 'none', 0.25],
-
-  ['centralAttack', 'passing', 'innerMidfield', 'none', 0.33],
-  ['centralAttack', 'passing', 'wing', 'none', 0.11],
-  ['centralAttack', 'passing', 'forward', 'none', 0.33],
-  ['centralAttack', 'scoring', 'innerMidfield', 'none', 0.22],
-  ['centralAttack', 'scoring', 'forward', 'none', 1],
-
-  ['sideAttack', 'passing', 'innerMidfield', 'middleOnly', 0.13],
-  ['sideAttack', 'passing', 'forward', 'none', 0.14],
-  ['sideAttack', 'passing', 'innerMidfield', 'thisSide', 0.26],
-  ['sideAttack', 'passing', 'wing', 'thisSide', 0.26],
-  ['sideAttack', 'winger', 'back', 'thisSide', 0.59],
-  ['sideAttack', 'winger', 'wing', 'thisSide', 0.86],
-  ['sideAttack', 'winger', 'forward', 'none', 0.24],
-  ['sideAttack', 'scoring', 'forward', 'none', 0.27],
+  ['sideDefence', 'keeper', 'goal', 'none', 'Normal', 0.61],
+  ['sideDefence', 'defending', 'goal', 'none', 'Normal', 0.25],
+  ['sideDefence', 'defending', 'centralDefence', 'thisSide', 'Normal', 0.52],
+  ['sideDefence', 'defending', 'centralDefence', 'thisSide', 'Ofensivo', 0.4],
+  ['sideDefence', 'defending', 'centralDefence', 'thisSide', 'Hacia la banda', 0.81],
+  ['sideDefence', 'defending', 'centralDefence', 'middleOnly', 'Normal', 0.26],
+  ['sideDefence', 'defending', 'centralDefence', 'middleOnly', 'Ofensivo', 0.2],
+  ['sideDefence', 'defending', 'back', 'thisSide', 'Normal', 0.92],
+  ['sideDefence', 'defending', 'back', 'thisSide', 'Ofensivo', 0.74],
+  ['sideDefence', 'defending', 'back', 'thisSide', 'Defensivo', 1],
+  ['sideDefence', 'defending', 'back', 'thisSide', 'Hacia el centro', 0.75],
+  ['sideDefence', 'defending', 'innerMidfield', 'thisSide', 'Normal', 0.19],
+  ['sideDefence', 'defending', 'innerMidfield', 'thisSide', 'Ofensivo', 0.09],
+  ['sideDefence', 'defending', 'innerMidfield', 'thisSide', 'Defensivo', 0.27],
+  ['sideDefence', 'defending', 'innerMidfield', 'thisSide', 'Hacia la banda', 0.24],
+  ['sideDefence', 'defending', 'innerMidfield', 'middleOnly', 'Normal', 0.095],
+  ['sideDefence', 'defending', 'innerMidfield', 'middleOnly', 'Ofensivo', 0.045],
+  ['sideDefence', 'defending', 'innerMidfield', 'middleOnly', 'Defensivo', 0.135],
+  ['sideDefence', 'defending', 'wing', 'thisSide', 'Normal', 0.35],
+  ['sideDefence', 'defending', 'wing', 'thisSide', 'Ofensivo', 0.22],
+  ['sideDefence', 'defending', 'wing', 'thisSide', 'Defensivo', 0.61],
+  ['sideDefence', 'defending', 'wing', 'thisSide', 'Hacia el centro', 0.29],
+  ['centralDefence', 'keeper', 'goal', 'none', 'Normal', 0.87],
+  ['centralDefence', 'defending', 'goal', 'none', 'Normal', 0.35],
+  ['centralDefence', 'defending', 'centralDefence', 'none', 'Normal', 1],
+  ['centralDefence', 'defending', 'centralDefence', 'none', 'Ofensivo', 0.73],
+  ['centralDefence', 'defending', 'centralDefence', 'none', 'Hacia la banda', 0.67],
+  ['centralDefence', 'defending', 'back', 'none', 'Normal', 0.38],
+  ['centralDefence', 'defending', 'back', 'none', 'Ofensivo', 0.35],
+  ['centralDefence', 'defending', 'back', 'none', 'Defensivo', 0.43],
+  ['centralDefence', 'defending', 'back', 'none', 'Hacia el centro', 0.7],
+  ['centralDefence', 'defending', 'innerMidfield', 'none', 'Normal', 0.4],
+  ['centralDefence', 'defending', 'innerMidfield', 'none', 'Ofensivo', 0.16],
+  ['centralDefence', 'defending', 'innerMidfield', 'none', 'Defensivo', 0.58],
+  ['centralDefence', 'defending', 'innerMidfield', 'none', 'Hacia la banda', 0.33],
+  ['centralDefence', 'defending', 'wing', 'none', 'Normal', 0.2],
+  ['centralDefence', 'defending', 'wing', 'none', 'Ofensivo', 0.13],
+  ['centralDefence', 'defending', 'wing', 'none', 'Defensivo', 0.25],
+  ['centralDefence', 'defending', 'wing', 'none', 'Hacia el centro', 0.25],
+  ['midfield', 'playmaking', 'centralDefence', 'none', 'Normal', 0.25],
+  ['midfield', 'playmaking', 'centralDefence', 'none', 'Ofensivo', 0.4],
+  ['midfield', 'playmaking', 'centralDefence', 'none', 'Hacia la banda', 0.15],
+  ['midfield', 'playmaking', 'back', 'none', 'Normal', 0.15],
+  ['midfield', 'playmaking', 'back', 'none', 'Ofensivo', 0.2],
+  ['midfield', 'playmaking', 'back', 'none', 'Defensivo', 0.1],
+  ['midfield', 'playmaking', 'back', 'none', 'Hacia el centro', 0.2],
+  ['midfield', 'playmaking', 'innerMidfield', 'none', 'Normal', 1],
+  ['midfield', 'playmaking', 'innerMidfield', 'none', 'Ofensivo', 0.95],
+  ['midfield', 'playmaking', 'innerMidfield', 'none', 'Defensivo', 0.95],
+  ['midfield', 'playmaking', 'innerMidfield', 'none', 'Hacia la banda', 0.9],
+  ['midfield', 'playmaking', 'wing', 'none', 'Normal', 0.45],
+  ['midfield', 'playmaking', 'wing', 'none', 'Ofensivo', 0.3],
+  ['midfield', 'playmaking', 'wing', 'none', 'Defensivo', 0.3],
+  ['midfield', 'playmaking', 'wing', 'none', 'Hacia el centro', 0.55],
+  ['midfield', 'playmaking', 'forward', 'none', 'Normal', 0.25],
+  ['midfield', 'playmaking', 'forward', 'none', 'Defensivo', 0.35],
+  ['midfield', 'playmaking', 'forward', 'none', 'Hacia la banda', 0.15],
+  ['centralAttack', 'passing', 'innerMidfield', 'none', 'Normal', 0.33],
+  ['centralAttack', 'passing', 'innerMidfield', 'none', 'Ofensivo', 0.49],
+  ['centralAttack', 'passing', 'innerMidfield', 'none', 'Defensivo', 0.18],
+  ['centralAttack', 'passing', 'innerMidfield', 'none', 'Hacia la banda', 0.23],
+  ['centralAttack', 'passing', 'wing', 'none', 'Normal', 0.11],
+  ['centralAttack', 'passing', 'wing', 'none', 'Ofensivo', 0.13],
+  ['centralAttack', 'passing', 'wing', 'none', 'Defensivo', 0.05],
+  ['centralAttack', 'passing', 'wing', 'none', 'Hacia el centro', 0.16],
+  ['centralAttack', 'passing', 'forward', 'none', 'Normal', 0.33],
+  ['centralAttack', 'passing', 'forward', 'none', 'Defensivo', 0.53],
+  ['centralAttack', 'passing', 'forward', 'none', 'Hacia la banda', 0.23],
+  ['centralAttack', 'scoring', 'innerMidfield', 'none', 'Normal', 0.22],
+  ['centralAttack', 'scoring', 'innerMidfield', 'none', 'Ofensivo', 0.31],
+  ['centralAttack', 'scoring', 'innerMidfield', 'none', 'Defensivo', 0.13],
+  ['centralAttack', 'scoring', 'forward', 'none', 'Normal', 1],
+  ['centralAttack', 'scoring', 'forward', 'none', 'Defensivo', 0.56],
+  ['centralAttack', 'scoring', 'forward', 'none', 'Hacia la banda', 0.66],
+  ['sideAttack', 'passing', 'innerMidfield', 'middleOnly', 'Normal', 0.13],
+  ['sideAttack', 'passing', 'innerMidfield', 'middleOnly', 'Ofensivo', 0.18],
+  ['sideAttack', 'passing', 'innerMidfield', 'middleOnly', 'Defensivo', 0.07],
+  ['sideAttack', 'passing', 'forward', 'none', 'Normal', 0.14],
+  ['sideAttack', 'passing', 'forward', 'none', 'Defensivo', 0.31],
+  ['sideAttack', 'passing', 'innerMidfield', 'thisSide', 'Normal', 0.26],
+  ['sideAttack', 'passing', 'innerMidfield', 'thisSide', 'Ofensivo', 0.36],
+  ['sideAttack', 'passing', 'innerMidfield', 'thisSide', 'Defensivo', 0.14],
+  ['sideAttack', 'passing', 'innerMidfield', 'thisSide', 'Hacia la banda', 0.31],
+  ['sideAttack', 'passing', 'wing', 'thisSide', 'Normal', 0.26],
+  ['sideAttack', 'passing', 'wing', 'thisSide', 'Ofensivo', 0.29],
+  ['sideAttack', 'passing', 'wing', 'thisSide', 'Defensivo', 0.21],
+  ['sideAttack', 'passing', 'wing', 'thisSide', 'Hacia el centro', 0.15],
+  ['sideAttack', 'passing', 'forward', 'thisSide', 'Hacia la banda', 0.21],
+  ['sideAttack', 'passing', 'forward', 'oppositeSide', 'Hacia la banda', 0.06],
+  ['sideAttack', 'winger', 'centralDefence', 'thisSide', 'Hacia la banda', 0.26],
+  ['sideAttack', 'winger', 'back', 'thisSide', 'Normal', 0.59],
+  ['sideAttack', 'winger', 'back', 'thisSide', 'Ofensivo', 0.69],
+  ['sideAttack', 'winger', 'back', 'thisSide', 'Defensivo', 0.45],
+  ['sideAttack', 'winger', 'back', 'thisSide', 'Hacia el centro', 0.35],
+  ['sideAttack', 'winger', 'innerMidfield', 'thisSide', 'Hacia la banda', 0.59],
+  ['sideAttack', 'winger', 'wing', 'thisSide', 'Normal', 0.86],
+  ['sideAttack', 'winger', 'wing', 'thisSide', 'Ofensivo', 1],
+  ['sideAttack', 'winger', 'wing', 'thisSide', 'Defensivo', 0.69],
+  ['sideAttack', 'winger', 'wing', 'thisSide', 'Hacia el centro', 0.74],
+  ['sideAttack', 'winger', 'forward', 'none', 'Normal', 0.24],
+  ['sideAttack', 'winger', 'forward', 'none', 'Defensivo', 0.13],
+  ['sideAttack', 'winger', 'forward', 'thisSide', 'Hacia la banda', 0.64],
+  ['sideAttack', 'winger', 'forward', 'oppositeSide', 'Hacia la banda', 0.21],
+  ['sideAttack', 'scoring', 'forward', 'none', 'Normal', 0.27],
+  ['sideAttack', 'scoring', 'forward', 'none', 'Defensivo', 0.13],
+  ['sideAttack', 'scoring', 'forward', 'oppositeSide', 'Hacia la banda', 0.19],
+  ['sideAttack', 'scoring', 'forward', 'thisSide', 'Hacia la banda', 0.51],
 ];
 
 const ratingSectors: {key: RatingSector; set: ContributionSet; side: Side; scale: number; experience: number}[] = [
@@ -106,8 +179,11 @@ const playerStrength = (player: Player, skill: Skill) => (skillValue(player, ski
 
 function sideRestrictionAllows(position: Position, ratingSide: Side, restriction: SideRestriction): boolean {
   if (restriction === 'none') return true;
-  if (restriction === 'middleOnly') return position.side === 'middle' && [103, 108, 112].includes(position.role);
-  return position.side === ratingSide;
+  if (restriction === 'middleOnly') return [103, 108, 112].includes(position.role);
+  if (restriction === 'thisSide') return position.side === ratingSide;
+  if (ratingSide === 'left') return position.side === 'right';
+  if (ratingSide === 'right') return position.side === 'left';
+  return false;
 }
 
 function experienceContribution(player: Player, factor: number): number {
@@ -121,17 +197,27 @@ function averageStaminaFactor(player: Player): number {
   return Math.min(1, -0.0033 * stamina ** 2 + 0.085 * stamina + 0.51);
 }
 
-function normalRating(player: Player, position: Position): number {
+function normalRating(player: Player, position: Position, behavior: PlayerBehavior = 'Normal'): number {
   let sum = 0;
   for (const sector of ratingSectors) {
     const contribution = factors
-      .filter(([set, , playerSector, restriction]) => set === sector.set && playerSector === position.sector && sideRestrictionAllows(position, sector.side, restriction))
-      .reduce((total, [, skill, , , weight]) => total + playerStrength(player, skill) * weight, 0);
+      .filter(([set, , playerSector, restriction, factorBehavior]) => set === sector.set && playerSector === position.sector && factorBehavior === behavior && sideRestrictionAllows(position, sector.side, restriction))
+      .reduce((total, [, skill, , , , weight]) => total + playerStrength(player, skill) * weight, 0);
     let sectorContribution = contribution;
     if (contribution > 0) sectorContribution += experienceContribution(player, sector.experience);
     sum += sectorContribution * sector.scale * (sector.key === 'midfield' ? 3 : 1);
   }
   return sum > 0 ? (sum ** 1.2 / 4) * averageStaminaFactor(player) : 0;
+}
+
+export function getBehaviorsForSlot(slot: string, slots: string[]): PlayerBehavior[] {
+  const role = getRoleIdForSlot(slot, slots);
+  if (role === 100) return ['Normal'];
+  if ([102, 103, 104].includes(role)) return ['Normal', 'Ofensivo', 'Hacia la banda'];
+  if ([101, 105].includes(role)) return ['Normal', 'Ofensivo', 'Defensivo', 'Hacia el centro'];
+  if ([106, 110].includes(role)) return ['Normal', 'Ofensivo', 'Defensivo', 'Hacia el centro'];
+  if ([107, 108, 109].includes(role)) return ['Normal', 'Ofensivo', 'Defensivo', 'Hacia la banda'];
+  return ['Normal', 'Defensivo', 'Hacia la banda'];
 }
 
 export function getRoleIdForSlot(slot: string, slots: string[]): number {
@@ -155,7 +241,7 @@ export function getRoleIdForSlot(slot: string, slots: string[]): number {
   return roles[index] ?? 112;
 }
 
-export function estimateLineupSectors(players: Player[], lineup: Record<string, string>, slots: string[], tactic: RatingTactic = 'Normal'): LineupSectorRatings {
+export function estimateLineupSectors(players: Player[], lineup: Record<string, string>, slots: string[], tactic: RatingTactic = 'Normal', behaviors: Record<string, PlayerBehavior> = {}): LineupSectorRatings {
   const totals: LineupSectorRatings = {
     defenceLeft: 0, defenceCentral: 0, defenceRight: 0, midfield: 0,
     attackLeft: 0, attackCentral: 0, attackRight: 0,
@@ -164,12 +250,12 @@ export function estimateLineupSectors(players: Player[], lineup: Record<string, 
   const positionsInLineup = slots.flatMap(slot => {
     const player = playerById.get(lineup[slot]);
     const position = positions.find(candidate => candidate.role === getRoleIdForSlot(slot, slots));
-    return player && position ? [{player, position}] : [];
+    return player && position ? [{player, position, behavior: behaviors[slot] ?? 'Normal'}] : [];
   });
   const sectorCounts = new Map<Sector, number>();
   for (const {position} of positionsInLineup) sectorCounts.set(position.sector, (sectorCounts.get(position.sector) ?? 0) + 1);
 
-  for (const {player, position} of positionsInLineup) {
+  for (const {player, position, behavior} of positionsInLineup) {
     let overcrowding = 1;
     const count = sectorCounts.get(position.sector) ?? 0;
     if (position.sector === 'centralDefence' && count === 2) overcrowding = 0.964;
@@ -181,8 +267,8 @@ export function estimateLineupSectors(players: Player[], lineup: Record<string, 
 
     for (const sector of ratingSectors) {
       const contribution = factors
-        .filter(([set, , playerSector, restriction]) => set === sector.set && playerSector === position.sector && sideRestrictionAllows(position, sector.side, restriction))
-        .reduce((sum, [, skill, , , weight]) => sum + playerStrength(player, skill) * weight, 0);
+        .filter(([set, , playerSector, restriction, factorBehavior]) => set === sector.set && playerSector === position.sector && factorBehavior === behavior && sideRestrictionAllows(position, sector.side, restriction))
+        .reduce((sum, [, skill, , , , weight]) => sum + playerStrength(player, skill) * weight, 0);
       if (contribution <= 0) continue;
       totals[sector.key] += (contribution * overcrowding + experienceContribution(player, sector.experience)) * averageStaminaFactor(player);
     }
@@ -204,9 +290,9 @@ export function getPlayerPositionEstimate(player: Player, group: PositionGroup):
   return positions.filter(position => roles.has(position.role)).reduce((best, position) => Math.max(best, normalRating(player, position)), 0);
 }
 
-export function getPlayerRoleEstimate(player: Player, roleId: number): number {
+export function getPlayerRoleEstimate(player: Player, roleId: number, behavior: PlayerBehavior = 'Normal'): number {
   const position = positions.find(candidate => candidate.role === roleId);
-  return position ? normalRating(player, position) : 0;
+  return position ? normalRating(player, position, behavior) : 0;
 }
 
 function matchStaminaFactor(player: Player, minute: number, pressing: boolean): number {
