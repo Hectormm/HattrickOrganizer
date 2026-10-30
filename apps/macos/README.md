@@ -11,7 +11,7 @@ The estimates port the original `RatingPredictionModel` contribution factors for
 
 ## Local setup
 
-The app targets React Native 0.76.9 with `react-native-macos` 0.76.12 and reuses the shared screens with React Native Web for a browser build. It requires Node.js; the macOS target also requires Xcode and CocoaPods. From this directory:
+The app targets React Native 0.76.9 with `react-native-macos` 0.76.12 and reuses the shared screens with React Native Web for a browser build. Storage and HRF picking use platform adapters: macOS bridges, iOS/Android native modules, and browser storage/file input. iOS and Android JavaScript bundles resolve successfully, but their native host projects have not been scaffolded yet. It requires Node.js; the macOS target also requires Xcode and CocoaPods. From this directory:
 
 ```sh
 npm install
