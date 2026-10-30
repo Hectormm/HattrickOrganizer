@@ -11,6 +11,7 @@ type RatingKey = 'defenceLeft' | 'defenceCentral' | 'defenceRight' | 'midfield' 
 type OpponentRatings = Record<RatingKey, string>;
 type MatchSettings = {teamSpirit: string; confidence: string; coachModifier: string; attitude: MatchAttitude; venue: MatchVenue};
 type PlannedSubstitution = HrfSubstitution;
+type ImportedOpponentLineup = {formation: Formation; tactic: Tactic; lineup: Record<string, string>; behaviors: Record<string, PlayerBehavior>};
 
 const tabs: Tab[] = ['Plantilla', 'Alineación', 'Team Analyzer'];
 const formations: Formation[] = ['3-5-2', '4-4-2', '4-5-1', '5-3-2', '3-4-3', '5-5-0'];
@@ -204,6 +205,22 @@ function sanitizeBehaviors(value: unknown, allowedSlots: Set<string>): Record<st
     allowedSlots.has(slot) && getBehaviorsForSlot(slot, [...allowedSlots]).includes(behavior as PlayerBehavior)) as [string, PlayerBehavior][]);
 }
 
+function readImportedOpponentLineup(value: unknown, players: Player[]): ImportedOpponentLineup | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const saved = value as Record<string, unknown>;
+  if (!formations.includes(saved.formation as Formation) || !tactics.includes(saved.tactic as Tactic)) return null;
+  const formation = saved.formation as Formation;
+  const allowedSlots = new Set(formationRows(formation).flat());
+  const lineup = sanitizeLineup(saved.lineup, allowedSlots, new Set(players.map(player => player.id)));
+  if (!lineup.Portero) return null;
+  return {
+    formation,
+    tactic: saved.tactic as Tactic,
+    lineup,
+    behaviors: sanitizeBehaviors(saved.behaviors, allowedSlots),
+  };
+}
+
 export default function App() {
   const [activeTab, setActiveTab] = useState<Tab>('Alineación');
   const [formation, setFormation] = useState<Formation>('3-5-2');
@@ -218,6 +235,7 @@ export default function App() {
   }), [opponentMatchSettings, matchContext.venue]);
   const [team, setTeam] = useState<Team | null>(null);
   const [opponentTeam, setOpponentTeam] = useState<Team | null>(null);
+  const [opponentImportedLineup, setOpponentImportedLineup] = useState<ImportedOpponentLineup | null>(null);
   const [opponentFormation, setOpponentFormation] = useState<Formation>('3-5-2');
   const [opponentTactic, setOpponentTactic] = useState<Tactic>('Normal');
   const [opponentName, setOpponentName] = useState('');
@@ -241,7 +259,15 @@ export default function App() {
   const slots = useMemo(() => rows.flat(), [rows]);
   const opponentRows = useMemo(() => formationRows(opponentFormation), [opponentFormation]);
   const opponentSlots = useMemo(() => opponentRows.flat(), [opponentRows]);
-  const opponentLineupResult = useMemo(() => opponentTeam ? optimizeLineup(opponentTeam.players, opponentSlots, opponentTactic, null, {}, weather, opponentMatchContext) : null, [opponentTeam, opponentSlots, opponentTactic, weather, opponentMatchContext]);
+  const usingImportedOpponentLineup = opponentImportedLineup?.formation === opponentFormation && opponentImportedLineup.tactic === opponentTactic;
+  const opponentLineupResult = useMemo(() => {
+    if (!opponentTeam) return null;
+    if (usingImportedOpponentLineup && opponentImportedLineup) {
+      const ratings = estimateLineupSectors(opponentTeam.players, opponentImportedLineup.lineup, opponentSlots, opponentTactic, opponentImportedLineup.behaviors, weather, opponentMatchContext);
+      return {assignments: opponentImportedLineup.lineup, behaviors: opponentImportedLineup.behaviors, totalRating: Object.values(ratings).reduce((sum, value) => sum + value, 0), matchupScore: null};
+    }
+    return optimizeLineup(opponentTeam.players, opponentSlots, opponentTactic, null, {}, weather, opponentMatchContext);
+  }, [opponentTeam, opponentImportedLineup, usingImportedOpponentLineup, opponentSlots, opponentTactic, weather, opponentMatchContext]);
   const opponentSectorRatings = useMemo(() => opponentTeam && opponentLineupResult
     ? estimateLineupSectors(opponentTeam.players, opponentLineupResult.assignments, opponentSlots, opponentTactic, opponentLineupResult.behaviors, weather, opponentMatchContext)
     : null, [opponentTeam, opponentLineupResult, opponentSlots, opponentTactic, weather, opponentMatchContext]);
@@ -293,7 +319,7 @@ export default function App() {
     let mounted = true;
     storage.loadState().then((saved: unknown) => {
       if (!mounted || !saved || typeof saved !== 'object') return;
-      const state = saved as {team?: unknown; formation?: unknown; tactic?: unknown; lineup?: unknown; opponentTeam?: unknown; opponentFormation?: unknown; opponentTactic?: unknown; opponentName?: unknown; opponentRatings?: unknown; behaviors?: unknown; weather?: unknown; matchSettings?: unknown; opponentMatchSettings?: unknown; plannedSubstitutions?: unknown; substitutionMinute?: unknown; previewMinute?: unknown; previewGoalDifference?: unknown; previewRedCard?: unknown};
+      const state = saved as {team?: unknown; formation?: unknown; tactic?: unknown; lineup?: unknown; opponentTeam?: unknown; opponentImportedLineup?: unknown; opponentFormation?: unknown; opponentTactic?: unknown; opponentName?: unknown; opponentRatings?: unknown; behaviors?: unknown; weather?: unknown; matchSettings?: unknown; opponentMatchSettings?: unknown; plannedSubstitutions?: unknown; substitutionMinute?: unknown; previewMinute?: unknown; previewGoalDifference?: unknown; previewRedCard?: unknown};
       const savedTeam = isTeam(state.team) ? state.team : null;
       const savedOpponentTeam = isTeam(state.opponentTeam) ? state.opponentTeam : null;
       const savedFormation = formations.includes(state.formation as Formation) ? state.formation as Formation : '3-5-2';
@@ -306,6 +332,7 @@ export default function App() {
 
       setTeam(savedTeam);
       setOpponentTeam(savedOpponentTeam);
+      setOpponentImportedLineup(readImportedOpponentLineup(state.opponentImportedLineup, savedOpponentTeam?.players ?? []));
       setOpponentFormation(savedOpponentFormation);
       setOpponentTactic(savedOpponentTactic);
       setOpponentName(typeof state.opponentName === 'string' ? state.opponentName : '');
@@ -348,10 +375,10 @@ export default function App() {
 
   useEffect(() => {
     if (!storageReady || !NativeModules.HOStorage) return;
-    NativeModules.HOStorage.saveState({team, lineup, behaviors, formation, tactic, weather, matchSettings, opponentMatchSettings, opponentTeam, opponentFormation, opponentTactic, opponentName, opponentRatings, plannedSubstitutions, substitutionMinute, previewMinute, previewGoalDifference, previewRedCard}).catch((error: unknown) => {
+    NativeModules.HOStorage.saveState({team, lineup, behaviors, formation, tactic, weather, matchSettings, opponentMatchSettings, opponentTeam, opponentImportedLineup, opponentFormation, opponentTactic, opponentName, opponentRatings, plannedSubstitutions, substitutionMinute, previewMinute, previewGoalDifference, previewRedCard}).catch((error: unknown) => {
       console.warn('No se pudieron guardar los datos de HO.', error);
     });
-  }, [storageReady, team, lineup, behaviors, formation, tactic, weather, matchSettings, opponentMatchSettings, opponentTeam, opponentFormation, opponentTactic, opponentName, opponentRatings, plannedSubstitutions, substitutionMinute, previewMinute, previewGoalDifference, previewRedCard]);
+  }, [storageReady, team, lineup, behaviors, formation, tactic, weather, matchSettings, opponentMatchSettings, opponentTeam, opponentImportedLineup, opponentFormation, opponentTactic, opponentName, opponentRatings, plannedSubstitutions, substitutionMinute, previewMinute, previewGoalDifference, previewRedCard]);
 
   const chooseFormation = (next: Formation) => {
     setFormation(next);
@@ -413,6 +440,14 @@ export default function App() {
       const imported = parseHrf(source);
       setOpponentTeam(imported.team);
       setOpponentName(imported.team.name);
+      setOpponentFormation(imported.formation ?? '3-5-2');
+      setOpponentTactic(imported.tactic ?? 'Normal');
+      setOpponentImportedLineup(imported.formation && imported.lineup ? {
+        formation: imported.formation,
+        tactic: imported.tactic ?? 'Normal',
+        lineup: imported.lineup,
+        behaviors: imported.behaviors ?? {},
+      } : null);
       setOpponentMatchSettings({
         teamSpirit: String(imported.matchContext?.teamSpirit ?? defaultMatchContext.teamSpirit),
         confidence: String(imported.matchContext?.confidence ?? defaultMatchContext.confidence),
@@ -657,12 +692,12 @@ export default function App() {
               {opponentTeam ? (
                 <View style={styles.opponentTeamCard}>
                   <Text style={styles.cardTitle}>{opponentTeam.name} · {opponentTeam.players.length} jugadores</Text>
-                  <Text style={styles.caption}>Contexto HRF: espíritu {opponentMatchContext.teamSpirit}, confianza {opponentMatchContext.confidence}, entrenador {opponentMatchContext.coachModifier >= 0 ? '+' : ''}{opponentMatchContext.coachModifier}, {opponentMatchContext.attitude.toLowerCase()}. Se estima su mejor once con el clima y la sede contraria a tu equipo.</Text>
+                  <Text style={styles.caption}>Contexto aplicado: espíritu {opponentMatchContext.teamSpirit}, confianza {opponentMatchContext.confidence}, entrenador {opponentMatchContext.coachModifier >= 0 ? '+' : ''}{opponentMatchContext.coachModifier}, {opponentMatchContext.attitude.toLowerCase()}. {usingImportedOpponentLineup ? 'Se muestra la alineación de partido importada.' : 'Se estima su mejor once para esta formación y táctica.'}</Text>
                   <Text style={styles.metricName}>Formación del rival</Text>
                   <View style={styles.choices}>{formations.map(item => <Choice key={`opponent-${item}`} label={item} selected={opponentFormation === item} onPress={() => setOpponentFormation(item)} />)}</View>
-                  <Text style={styles.metricName}>Táctica estimada del rival</Text>
+                  <Text style={styles.metricName}>{usingImportedOpponentLineup ? 'Táctica del HRF' : 'Táctica estimada del rival'}</Text>
                   <View style={styles.choices}>{tactics.map(item => <Choice key={`opponent-${item}`} label={item} selected={opponentTactic === item} onPress={() => setOpponentTactic(item)} />)}</View>
-                  <Text style={styles.caption}>Alineación estimada: {opponentLineupResult ? `${Object.keys(opponentLineupResult.assignments).length}/${opponentSlots.length} puestos` : '—'} · ratings calculados, no importados de un partido.</Text>
+                  <Text style={styles.caption}>{usingImportedOpponentLineup ? 'Alineación del HRF' : 'Alineación estimada'}: {opponentLineupResult ? `${Object.keys(opponentLineupResult.assignments).length}/${opponentSlots.length} puestos` : '—'} · ratings calculados.</Text>
                   <View style={styles.pitch}>
                     {opponentRows.map((row, index) => (
                       <View key={`opponent-row-${index}`} style={styles.row}>
@@ -680,7 +715,7 @@ export default function App() {
                       ))}
                     </View>
                   ) : null}
-                  <Text style={styles.caption}>Estimación sin clima ni eventos del partido; Presionar no descuenta aquí la resistencia adicional.</Text>
+                  <Text style={styles.caption}>Ratings con clima, contexto y sede. No incluyen eventos durante el partido.</Text>
                 </View>
               ) : null}
               <TextInput
