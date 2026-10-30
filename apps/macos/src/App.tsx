@@ -10,6 +10,7 @@ type Tactic = RatingTactic;
 type RatingKey = 'defenceLeft' | 'defenceCentral' | 'defenceRight' | 'midfield' | 'attackLeft' | 'attackCentral' | 'attackRight';
 type OpponentRatings = Record<RatingKey, string>;
 type MatchSettings = {teamSpirit: string; confidence: string; coachModifier: string; attitude: MatchAttitude; venue: MatchVenue};
+type PlannedSubstitution = {slot: string; outgoingPlayerId: string; incomingPlayerId: string; minute: number};
 
 const tabs: Tab[] = ['Plantilla', 'Alineación', 'Team Analyzer'];
 const formations: Formation[] = ['3-5-2', '4-4-2', '4-5-1', '5-3-2', '3-4-3'];
@@ -174,6 +175,9 @@ export default function App() {
   const [lineupMessage, setLineupMessage] = useState('');
   const [lineup, setLineup] = useState<Record<string, string>>({});
   const [behaviors, setBehaviors] = useState<Record<string, PlayerBehavior>>({});
+  const [plannedSubstitutions, setPlannedSubstitutions] = useState<PlannedSubstitution[]>([]);
+  const [substitutionMinute, setSubstitutionMinute] = useState('60');
+  const [previewMinute, setPreviewMinute] = useState('90');
   const [activeSlot, setActiveSlot] = useState<string | null>(null);
   const [storageReady, setStorageReady] = useState(false);
   const rows = useMemo(() => formationRows(formation), [formation]);
@@ -193,6 +197,19 @@ export default function App() {
   const hasCompleteOpponentRatings = Object.keys(emptyOpponentRatings).every(key => typeof parsedOpponentRatings[key as RatingKey] === 'number');
   const hasAnyOpponentRatings = Object.values(parsedOpponentRatings).some(value => typeof value === 'number');
   const benchSuggestions = useMemo(() => team ? getBenchSuggestions(team.players, lineup, slots, tactic, hasCompleteOpponentRatings ? parsedOpponentRatings : null, behaviors, weather, matchContext) : [], [team, lineup, slots, tactic, hasCompleteOpponentRatings, parsedOpponentRatings, behaviors, weather, matchContext]);
+  const projectedMinute = Math.max(0, Math.min(120, Number(previewMinute.replace(',', '.')) || 0));
+  const projectedLineup = useMemo(() => {
+    const projection = {...lineup};
+    for (const substitution of [...plannedSubstitutions].sort((a, b) => a.minute - b.minute)) {
+      if (substitution.minute > projectedMinute || projection[substitution.slot] !== substitution.outgoingPlayerId) continue;
+      if (Object.values(projection).includes(substitution.incomingPlayerId)) continue;
+      projection[substitution.slot] = substitution.incomingPlayerId;
+    }
+    return projection;
+  }, [lineup, plannedSubstitutions, projectedMinute]);
+  const projectedRatings = useMemo(() => team && plannedSubstitutions.length
+    ? estimateLineupSectors(team.players, projectedLineup, slots, tactic, behaviors, weather, matchContext)
+    : null, [team, plannedSubstitutions.length, projectedLineup, slots, tactic, behaviors, weather, matchContext]);
   const formationRecommendations = useMemo(() => {
     if (!team || !hasCompleteOpponentRatings || activeTab !== 'Alineación') return [];
     return formations.flatMap(candidateFormation => {
@@ -217,7 +234,7 @@ export default function App() {
     let mounted = true;
     storage.loadState().then((saved: unknown) => {
       if (!mounted || !saved || typeof saved !== 'object') return;
-      const state = saved as {team?: unknown; formation?: unknown; tactic?: unknown; lineup?: unknown; opponentTeam?: unknown; opponentFormation?: unknown; opponentTactic?: unknown; opponentName?: unknown; opponentRatings?: unknown; behaviors?: unknown; weather?: unknown; matchSettings?: unknown};
+      const state = saved as {team?: unknown; formation?: unknown; tactic?: unknown; lineup?: unknown; opponentTeam?: unknown; opponentFormation?: unknown; opponentTactic?: unknown; opponentName?: unknown; opponentRatings?: unknown; behaviors?: unknown; weather?: unknown; matchSettings?: unknown; plannedSubstitutions?: unknown; substitutionMinute?: unknown; previewMinute?: unknown};
       const savedTeam = isTeam(state.team) ? state.team : null;
       const savedOpponentTeam = isTeam(state.opponentTeam) ? state.opponentTeam : null;
       const savedFormation = formations.includes(state.formation as Formation) ? state.formation as Formation : '3-5-2';
@@ -237,6 +254,12 @@ export default function App() {
       setTactic(savedTactic);
       setWeather(savedWeather);
       setMatchSettings(savedMatchSettings);
+      if (Array.isArray(state.plannedSubstitutions)) {
+        const validIds = new Set(savedTeam?.players.map(player => player.id) ?? []);
+        setPlannedSubstitutions(state.plannedSubstitutions.filter((item): item is PlannedSubstitution => Boolean(item && typeof item === 'object' && typeof (item as PlannedSubstitution).slot === 'string' && typeof (item as PlannedSubstitution).outgoingPlayerId === 'string' && typeof (item as PlannedSubstitution).incomingPlayerId === 'string' && validIds.has((item as PlannedSubstitution).outgoingPlayerId) && validIds.has((item as PlannedSubstitution).incomingPlayerId) && Number.isInteger((item as PlannedSubstitution).minute) && (item as PlannedSubstitution).minute >= 0 && (item as PlannedSubstitution).minute <= 120)).slice(0, 3));
+      }
+      if (typeof state.substitutionMinute === 'string') setSubstitutionMinute(state.substitutionMinute);
+      if (typeof state.previewMinute === 'string') setPreviewMinute(state.previewMinute);
       setBehaviors(sanitizeBehaviors(state.behaviors, new Set(formationRows(savedFormation).flat())));
       if (savedTeam && isLineup(state.lineup)) {
         const playerIds = new Set(savedTeam.players.map(player => player.id));
@@ -254,13 +277,14 @@ export default function App() {
 
   useEffect(() => {
     if (!storageReady || !NativeModules.HOStorage) return;
-    NativeModules.HOStorage.saveState({team, lineup, behaviors, formation, tactic, weather, matchSettings, opponentTeam, opponentFormation, opponentTactic, opponentName, opponentRatings}).catch((error: unknown) => {
+    NativeModules.HOStorage.saveState({team, lineup, behaviors, formation, tactic, weather, matchSettings, opponentTeam, opponentFormation, opponentTactic, opponentName, opponentRatings, plannedSubstitutions, substitutionMinute, previewMinute}).catch((error: unknown) => {
       console.warn('No se pudieron guardar los datos de HO.', error);
     });
-  }, [storageReady, team, lineup, behaviors, formation, tactic, weather, matchSettings, opponentTeam, opponentFormation, opponentTactic, opponentName, opponentRatings]);
+  }, [storageReady, team, lineup, behaviors, formation, tactic, weather, matchSettings, opponentTeam, opponentFormation, opponentTactic, opponentName, opponentRatings, plannedSubstitutions, substitutionMinute, previewMinute]);
 
   const chooseFormation = (next: Formation) => {
     setFormation(next);
+    setPlannedSubstitutions([]);
     const availableSlots = new Set(formationRows(next).flat());
     setLineup(previous => Object.fromEntries(Object.entries(previous).filter(([slot]) => availableSlots.has(slot))));
     setBehaviors(previous => Object.fromEntries(Object.entries(previous).filter(([slot]) => availableSlots.has(slot))));
@@ -273,6 +297,7 @@ export default function App() {
       setTeam(imported);
       setLineup({});
       setBehaviors({});
+      setPlannedSubstitutions([]);
       setActiveSlot(null);
       setImportMessage(`${imported.players.length} jugadores importados · ${imported.name}`);
     } catch (error) {
@@ -326,6 +351,7 @@ export default function App() {
     const result = optimizeLineup(team.players, slots, tactic, hasCompleteOpponentRatings ? parsedOpponentRatings : null, behaviors, weather, matchContext);
     setLineup(result.assignments);
     setBehaviors(result.behaviors);
+    setPlannedSubstitutions([]);
     setActiveSlot(null);
     const coverage = `${Object.keys(result.assignments).length}/${slots.length} puestos cubiertos`;
     setLineupMessage(result.matchupScore !== null
@@ -337,6 +363,7 @@ export default function App() {
     setTactic(recommendation.tactic);
     setLineup(recommendation.result.assignments);
     setBehaviors(recommendation.result.behaviors);
+    setPlannedSubstitutions([]);
     setActiveSlot(null);
     const score = recommendation.result.matchupScore;
     const coverage = `${Object.keys(recommendation.result.assignments).length}/${recommendation.slots.length} puestos cubiertos`;
@@ -449,16 +476,30 @@ export default function App() {
                           : 'Cálculo HO con el nivel de Pases de los diez jugadores de campo.'}</Text>
                 </View>
               ) : null}
-              {team && Object.keys(lineup).length > 0 && team.players.some(player => !Object.values(lineup).includes(player.id)) ? (
+              {team && Object.keys(lineup).length > 0 && (plannedSubstitutions.length > 0 || team.players.some(player => !Object.values(lineup).includes(player.id))) ? (
                 <View style={styles.sectorCard}>
-                  <Text style={styles.sectionTitle}>Cambios que mejoran el once</Text>
-                  <Text style={styles.caption}>{hasCompleteOpponentRatings ? 'Mejoran el índice de cruce contra los ratings del rival.' : 'Mejoran la suma de los siete ratings estimados con la táctica seleccionada.'}</Text>
+                  <Text style={styles.sectionTitle}>Plan de sustituciones</Text>
+                  <Text style={styles.caption}>{hasCompleteOpponentRatings ? 'Añade al plan los cambios que mejoran el índice de cruce contra el rival.' : 'Añade al plan los cambios de banquillo que mejoran los ratings estimados.'} Máximo tres cambios, como en HO.</Text>
+                  <View style={styles.contextInputRow}><Text style={styles.opponentInputLabel}>Minuto del próximo cambio (0–120)</Text><TextInput accessibilityLabel="Minuto de la sustitución" keyboardType="number-pad" onChangeText={setSubstitutionMinute} style={styles.contextInput} value={substitutionMinute} /></View>
                   {benchSuggestions.length ? benchSuggestions.map(suggestion => {
                     const outgoing = team.players.find(player => player.id === suggestion.outgoingPlayerId)?.name ?? 'Vacío';
                     const incoming = team.players.find(player => player.id === suggestion.incomingPlayerId)?.name ?? 'Jugador';
                     const gain = suggestion.matchupBased ? `+${(suggestion.gain * 100).toFixed(1)} pp de ventaja` : `+${suggestion.gain.toFixed(2)}★`;
-                    return <Choice key={`${suggestion.slot}-${suggestion.incomingPlayerId}`} label={`${suggestion.slot}: ${outgoing} → ${incoming} · ${gain}`} onPress={() => setLineup(previous => ({...previous, [suggestion.slot]: suggestion.incomingPlayerId}))} />;
+                    const minute = Math.max(0, Math.min(120, Math.round(Number(substitutionMinute.replace(',', '.')) || 0)));
+                    const duplicate = plannedSubstitutions.some(item => item.slot === suggestion.slot || item.incomingPlayerId === suggestion.incomingPlayerId || item.outgoingPlayerId === suggestion.incomingPlayerId);
+                    const disabled = plannedSubstitutions.length >= 3 || duplicate || !suggestion.outgoingPlayerId;
+                    return <Choice key={`${suggestion.slot}-${suggestion.incomingPlayerId}`} disabled={disabled} label={`${suggestion.slot}: ${outgoing} → ${incoming} · ${gain} · ${minute}' · añadir`} onPress={() => setPlannedSubstitutions(previous => [...previous, {slot: suggestion.slot, outgoingPlayerId: suggestion.outgoingPlayerId!, incomingPlayerId: suggestion.incomingPlayerId, minute}].sort((a, b) => a.minute - b.minute))} />;
                   }) : <Text style={styles.muted}>{hasCompleteOpponentRatings ? 'Ningún cambio del banquillo mejora el índice de cruce.' : 'Ningún cambio de un suplente mejora la suma estimada.'}</Text>}
+                  {plannedSubstitutions.length ? <>
+                    <Text style={styles.sectionTitle}>Cambios guardados · vista al minuto</Text>
+                    <View style={styles.contextInputRow}><Text style={styles.opponentInputLabel}>Minuto para calcular los ratings (0–120)</Text><TextInput accessibilityLabel="Minuto de la vista previa" keyboardType="number-pad" onChangeText={setPreviewMinute} style={styles.contextInput} value={previewMinute} /></View>
+                    {plannedSubstitutions.map((item, index) => {
+                      const from = team.players.find(player => player.id === item.outgoingPlayerId)?.name ?? 'Jugador';
+                      const to = team.players.find(player => player.id === item.incomingPlayerId)?.name ?? 'Jugador';
+                      return <Choice key={`${item.slot}-${item.incomingPlayerId}`} label={`${item.minute}' · ${item.slot}: ${from} → ${to} · quitar`} onPress={() => setPlannedSubstitutions(previous => previous.filter((_, itemIndex) => itemIndex !== index))} />;
+                    })}
+                    {projectedRatings ? <View style={styles.sectorGrid}>{lineupSectors.map(sector => <View key={`projected-${sector.key}`} style={styles.sectorRow}><Text style={styles.metricName}>{sector.label}</Text><Text style={styles.metricValue}>{projectedRatings[sector.key].toFixed(1)}★</Text></View>)}</View> : null}
+                  </> : null}
                 </View>
               ) : null}
               {activeSlot ? (
