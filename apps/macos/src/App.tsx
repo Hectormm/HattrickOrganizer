@@ -1,4 +1,4 @@
-import React, {useMemo, useState} from 'react';
+import React, {useEffect, useMemo, useState} from 'react';
 import {NativeModules, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, View} from 'react-native';
 import {parseHrf, Player, Team} from './hrf';
 
@@ -37,6 +37,18 @@ function average(players: Player[], key: keyof Player): string {
   return values.length ? (values.reduce((sum, value) => sum + value, 0) / values.length).toFixed(1) : '—';
 }
 
+function isTeam(value: unknown): value is Team {
+  if (!value || typeof value !== 'object') return false;
+  const candidate = value as Partial<Team>;
+  return typeof candidate.name === 'string' && Array.isArray(candidate.players) && candidate.players.every(player =>
+    player && typeof player.id === 'string' && typeof player.name === 'string');
+}
+
+function isLineup(value: unknown): value is Record<string, string> {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value) && Object.entries(value).every(([slot, playerId]) =>
+    typeof slot === 'string' && typeof playerId === 'string'));
+}
+
 export default function App() {
   const [activeTab, setActiveTab] = useState<Tab>('Alineación');
   const [formation, setFormation] = useState<Formation>('3-5-2');
@@ -46,9 +58,50 @@ export default function App() {
   const [importMessage, setImportMessage] = useState('');
   const [lineup, setLineup] = useState<Record<string, string>>({});
   const [activeSlot, setActiveSlot] = useState<string | null>(null);
+  const [storageReady, setStorageReady] = useState(false);
   const rows = useMemo(() => formationRows(formation), [formation]);
   const slots = useMemo(() => rows.flat(), [rows]);
   const assignedElsewhere = new Set(Object.entries(lineup).filter(([slot]) => slot !== activeSlot).map(([, playerId]) => playerId));
+
+  useEffect(() => {
+    const storage = NativeModules.HOStorage;
+    if (!storage) {
+      setStorageReady(true);
+      return;
+    }
+
+    let mounted = true;
+    storage.loadState().then((saved: unknown) => {
+      if (!mounted || !saved || typeof saved !== 'object') return;
+      const state = saved as {team?: unknown; formation?: unknown; tactic?: unknown; lineup?: unknown};
+      const savedTeam = isTeam(state.team) ? state.team : null;
+      const savedFormation = formations.includes(state.formation as Formation) ? state.formation as Formation : '3-5-2';
+      const savedTactic = tactics.includes(state.tactic as Tactic) ? state.tactic as Tactic : 'Normal';
+
+      setTeam(savedTeam);
+      setFormation(savedFormation);
+      setTactic(savedTactic);
+      if (savedTeam && isLineup(state.lineup)) {
+        const playerIds = new Set(savedTeam.players.map(player => player.id));
+        const slotsForFormation = new Set(formationRows(savedFormation).flat());
+        setLineup(Object.fromEntries(Object.entries(state.lineup).filter(([slot, playerId]) =>
+          slotsForFormation.has(slot) && playerIds.has(playerId))));
+      }
+    }).catch((error: unknown) => {
+      console.warn('No se pudieron cargar los datos guardados de HO.', error);
+    }).finally(() => {
+      if (mounted) setStorageReady(true);
+    });
+
+    return () => { mounted = false; };
+  }, []);
+
+  useEffect(() => {
+    if (!storageReady || !NativeModules.HOStorage) return;
+    NativeModules.HOStorage.saveState({team, lineup, formation, tactic}).catch((error: unknown) => {
+      console.warn('No se pudieron guardar los datos de HO.', error);
+    });
+  }, [storageReady, team, lineup, formation, tactic]);
 
   const chooseFormation = (next: Formation) => {
     setFormation(next);

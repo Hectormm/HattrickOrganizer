@@ -40,6 +40,71 @@ RCT_REMAP_METHOD(pickHRF,
 
 @end
 
+@interface HOStorage : NSObject <RCTBridgeModule>
+@end
+
+@implementation HOStorage
+
+RCT_EXPORT_MODULE();
+
+- (NSString *)stateFilePath
+{
+  NSArray<NSString *> *paths = NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory, NSUserDomainMask, YES);
+  NSString *supportDirectory = [paths.firstObject stringByAppendingPathComponent:@"HattrickOrganizer"];
+  return [supportDirectory stringByAppendingPathComponent:@"react-native-state.json"];
+}
+
+RCT_REMAP_METHOD(loadState,
+                 loadStateWithResolver:(RCTPromiseResolveBlock)resolve
+                 rejecter:(RCTPromiseRejectBlock)reject)
+{
+  NSString *path = [self stateFilePath];
+  NSData *data = [NSData dataWithContentsOfFile:path];
+  if (data == nil) {
+    resolve([NSNull null]);
+    return;
+  }
+
+  NSError *error = nil;
+  id state = [NSJSONSerialization JSONObjectWithData:data options:0 error:&error];
+  if ([state isKindOfClass:[NSDictionary class]]) {
+    resolve(state);
+  } else {
+    reject(@"state_read_failed", @"No se pudo leer el estado guardado.", error);
+  }
+}
+
+RCT_REMAP_METHOD(saveState,
+                 saveState:(NSDictionary *)state
+                 resolver:(RCTPromiseResolveBlock)resolve
+                 rejecter:(RCTPromiseRejectBlock)reject)
+{
+  NSError *error = nil;
+  NSData *data = [NSJSONSerialization dataWithJSONObject:state options:0 error:&error];
+  if (data == nil) {
+    reject(@"state_encode_failed", @"No se pudo codificar el estado de la app.", error);
+    return;
+  }
+
+  NSString *path = [self stateFilePath];
+  NSString *directory = [path stringByDeletingLastPathComponent];
+  if (![[NSFileManager defaultManager] createDirectoryAtPath:directory
+                                withIntermediateDirectories:YES
+                                                 attributes:nil
+                                                      error:&error]) {
+    reject(@"state_directory_failed", @"No se pudo crear el directorio de datos de la app.", error);
+    return;
+  }
+
+  if ([data writeToFile:path options:NSDataWritingAtomic error:&error]) {
+    resolve(@YES);
+  } else {
+    reject(@"state_write_failed", @"No se pudo guardar el estado de la app.", error);
+  }
+}
+
+@end
+
 @implementation AppDelegate
 
 - (void)applicationDidFinishLaunching:(NSNotification *)notification
