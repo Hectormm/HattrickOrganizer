@@ -294,12 +294,21 @@ export default function App() {
   const importTeam = (source = hrfText) => {
     try {
       const imported = parseHrf(source);
-      setTeam(imported);
-      setLineup({});
-      setBehaviors({});
-      setPlannedSubstitutions([]);
+      setTeam(imported.team);
+      if (imported.formation && imported.lineup) {
+        setFormation(imported.formation);
+        setLineup(imported.lineup);
+        setBehaviors(imported.behaviors ?? {});
+        setPlannedSubstitutions(imported.substitutions ?? []);
+        setMatchSettings(previous => ({...previous, attitude: imported.attitude ?? previous.attitude}));
+        setActiveTab('Alineación');
+      } else {
+        setLineup({});
+        setBehaviors({});
+        setPlannedSubstitutions([]);
+      }
       setActiveSlot(null);
-      setImportMessage(`${imported.players.length} jugadores importados · ${imported.name}`);
+      setImportMessage(`${imported.team.players.length} jugadores importados · ${imported.team.name}${imported.lineup ? ` · última alineación ${imported.formation} cargada` : ''}${imported.substitutions?.length ? ` · ${imported.substitutions.length} cambios programados` : ''}`);
     } catch (error) {
       setImportMessage(error instanceof Error ? error.message : 'No se pudo leer el HRF.');
     }
@@ -322,10 +331,10 @@ export default function App() {
       const source: string | null = await NativeModules.HODocumentPicker.pickHRF();
       if (!source) return;
       const imported = parseHrf(source);
-      setOpponentTeam(imported);
-      setOpponentName(imported.name);
+      setOpponentTeam(imported.team);
+      setOpponentName(imported.team.name);
       setOpponentRatings({...emptyOpponentRatings});
-      setOpponentImportMessage(`${imported.players.length} jugadores importados · ${imported.name}`);
+      setOpponentImportMessage(`${imported.team.players.length} jugadores importados · ${imported.team.name}`);
     } catch (error) {
       setOpponentImportMessage(error instanceof Error ? error.message : 'No se pudo abrir el HRF del rival.');
     }
