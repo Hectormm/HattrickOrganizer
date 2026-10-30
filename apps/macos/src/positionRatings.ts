@@ -19,6 +19,7 @@ type Skill = 'keeper' | 'defending' | 'playmaking' | 'passing' | 'winger' | 'sco
 
 type Factor = [ContributionSet, Skill, Sector, SideRestriction, number];
 type Position = {role: number; sector: Sector; side: Side};
+export type LineupSectorRatings = Record<RatingSector, number>;
 
 // Normal-behaviour factors ported from RatingPredictionModel.initRatingContributionParameterMap.
 const factors: Factor[] = [
@@ -129,6 +130,67 @@ function normalRating(player: Player, position: Position): number {
     sum += sectorContribution * sector.scale * (sector.key === 'midfield' ? 3 : 1);
   }
   return sum > 0 ? (sum ** 1.2 / 4) * averageStaminaFactor(player) : 0;
+}
+
+export function getRoleIdForSlot(slot: string, slots: string[]): number {
+  const index = Number(slot.match(/\d+$/)?.[0] ?? 1) - 1;
+  if (slot.startsWith('Portero')) return 100;
+  if (slot === 'Lateral izquierdo') return 105;
+  if (slot === 'Lateral derecho') return 101;
+  if (slot.startsWith('Defensa central')) {
+    const roles = slots.filter(candidate => candidate.startsWith('Defensa central')).length === 2 ? [102, 104] : [102, 103, 104];
+    return roles[index] ?? 103;
+  }
+  if (slot === 'Extremo izquierdo') return 110;
+  if (slot === 'Extremo derecho') return 106;
+  if (slot.startsWith('Centrocampista central')) {
+    const count = slots.filter(candidate => candidate.startsWith('Centrocampista central')).length;
+    const roles = count === 1 ? [108] : count === 2 ? [107, 109] : [107, 108, 109];
+    return roles[index] ?? 108;
+  }
+  const count = slots.filter(candidate => candidate.startsWith('Delantero')).length;
+  const roles = count === 1 ? [112] : count === 2 ? [111, 113] : [111, 112, 113];
+  return roles[index] ?? 112;
+}
+
+export function estimateLineupSectors(players: Player[], lineup: Record<string, string>, slots: string[]): LineupSectorRatings {
+  const totals: LineupSectorRatings = {
+    defenceLeft: 0, defenceCentral: 0, defenceRight: 0, midfield: 0,
+    attackLeft: 0, attackCentral: 0, attackRight: 0,
+  };
+  const playerById = new Map(players.map(player => [player.id, player]));
+  const positionsInLineup = slots.flatMap(slot => {
+    const player = playerById.get(lineup[slot]);
+    const position = positions.find(candidate => candidate.role === getRoleIdForSlot(slot, slots));
+    return player && position ? [{player, position}] : [];
+  });
+  const sectorCounts = new Map<Sector, number>();
+  for (const {position} of positionsInLineup) sectorCounts.set(position.sector, (sectorCounts.get(position.sector) ?? 0) + 1);
+
+  for (const {player, position} of positionsInLineup) {
+    let overcrowding = 1;
+    const count = sectorCounts.get(position.sector) ?? 0;
+    if (position.sector === 'centralDefence' && count === 2) overcrowding = 0.964;
+    if (position.sector === 'centralDefence' && count >= 3) overcrowding = 0.9;
+    if (position.sector === 'innerMidfield' && count === 2) overcrowding = 0.935;
+    if (position.sector === 'innerMidfield' && count >= 3) overcrowding = 0.825;
+    if (position.sector === 'forward' && count === 2) overcrowding = 0.945;
+    if (position.sector === 'forward' && count >= 3) overcrowding = 0.865;
+
+    for (const sector of ratingSectors) {
+      const contribution = factors
+        .filter(([set, , playerSector, restriction]) => set === sector.set && playerSector === position.sector && sideRestrictionAllows(position, sector.side, restriction))
+        .reduce((sum, [, skill, , , weight]) => sum + playerStrength(player, skill) * weight, 0);
+      if (contribution <= 0) continue;
+      totals[sector.key] += (contribution * overcrowding + experienceContribution(player, sector.experience)) * averageStaminaFactor(player);
+    }
+  }
+
+  for (const sector of ratingSectors) {
+    const base = totals[sector.key] * sector.scale * (sector.key === 'midfield' ? 3 : 1);
+    totals[sector.key] = base > 0 ? base ** 1.2 / 4 + 1 : 0.75;
+  }
+  return totals;
 }
 
 export function getPlayerPositionEstimate(player: Player, group: PositionGroup): number {

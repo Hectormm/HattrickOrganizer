@@ -1,31 +1,10 @@
 import {Player} from './hrf';
-import {getPlayerRoleEstimate} from './positionRatings';
+import {estimateLineupSectors, getPlayerRoleEstimate, getRoleIdForSlot} from './positionRatings';
 
 type LineupResult = {assignments: Record<string, string>; totalRating: number};
 
-function roleForSlot(slot: string, slots: string[]): number {
-  const index = Number(slot.match(/\d+$/)?.[0] ?? 1) - 1;
-  if (slot.startsWith('Portero')) return 100;
-  if (slot === 'Lateral izquierdo') return 105;
-  if (slot === 'Lateral derecho') return 101;
-  if (slot.startsWith('Defensa central')) {
-    const roles = slots.filter(candidate => candidate.startsWith('Defensa central')).length === 2 ? [102, 104] : [102, 103, 104];
-    return roles[index] ?? 103;
-  }
-  if (slot === 'Extremo izquierdo') return 110;
-  if (slot === 'Extremo derecho') return 106;
-  if (slot.startsWith('Centrocampista central')) {
-    const count = slots.filter(candidate => candidate.startsWith('Centrocampista central')).length;
-    const roles = count === 1 ? [108] : count === 2 ? [107, 109] : [107, 108, 109];
-    return roles[index] ?? 108;
-  }
-  const count = slots.filter(candidate => candidate.startsWith('Delantero')).length;
-  const roles = count === 1 ? [112] : count === 2 ? [111, 113] : [111, 112, 113];
-  return roles[index] ?? 112;
-}
-
 export function getPlayerSlotEstimate(player: Player, slot: string, slots: string[]): number {
-  return getPlayerRoleEstimate(player, roleForSlot(slot, slots));
+  return getPlayerRoleEstimate(player, getRoleIdForSlot(slot, slots));
 }
 
 /** Maximum-weight one-to-one assignment using the Hungarian algorithm. */
@@ -91,5 +70,41 @@ export function optimizeLineup(players: Player[], slots: string[]): LineupResult
     assignments[slots[row]] = players[j - 1].id;
     totalRating += weights[row][j - 1];
   }
-  return {assignments, totalRating};
+
+  // Refine the individual-rating assignment against the seven team-sector ratings.
+  const assignedIds = new Set(Object.values(assignments));
+  const bench = players.filter(player => !assignedIds.has(player.id));
+  const sectorScore = (candidate: Record<string, string>) =>
+    Object.values(estimateLineupSectors(players, candidate, slots)).reduce((sum, rating) => sum + rating, 0);
+  let bestScore = sectorScore(assignments);
+  let improved = true;
+  while (improved) {
+    improved = false;
+    let bestAssignments = assignments;
+    for (let i = 0; i < slots.length; i += 1) {
+      for (let j = i + 1; j < slots.length; j += 1) {
+        const candidate = {...assignments, [slots[i]]: assignments[slots[j]], [slots[j]]: assignments[slots[i]]};
+        const score = sectorScore(candidate);
+        if (score > bestScore + 1e-6) {
+          bestScore = score;
+          bestAssignments = candidate;
+        }
+      }
+      for (const substitute of bench) {
+        const candidate = {...assignments, [slots[i]]: substitute.id};
+        const score = sectorScore(candidate);
+        if (score > bestScore + 1e-6) {
+          bestScore = score;
+          bestAssignments = candidate;
+        }
+      }
+    }
+    if (bestAssignments !== assignments) {
+      const replaced = new Set(Object.values(bestAssignments));
+      bench.splice(0, bench.length, ...players.filter(player => !replaced.has(player.id)));
+      Object.assign(assignments, bestAssignments);
+      improved = true;
+    }
+  }
+  return {assignments, totalRating: bestScore};
 }

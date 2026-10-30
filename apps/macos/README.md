@@ -3,11 +3,11 @@
 This React Native for macOS prototype currently implements three screens:
 
 - **Plantilla** opens an `.hrf` file with the native macOS file picker (or accepts pasted text) and reads the team name, first-team players, and player skills.
-- **Alineación** supports five formations, player assignment to exact Hattrick role groups, and match tactic selection. “Calcular mejor once” uses a maximum-weight one-to-one assignment across the eleven slots, so no player is selected twice and unfilled slots stay empty when the imported squad has fewer players.
+- **Alineación** supports five formations, player assignment to exact Hattrick role groups, and match tactic selection. “Calcular mejor once” starts with a one-to-one player assignment and refines it against the sum of seven estimated team-sector ratings; no player is selected twice and slots stay empty when the imported squad has fewer than eleven players. The screen displays the seven estimates for the current draft lineup.
 - **Team Analyzer** calculates squad skill averages and ranks three player profiles for goalkeeper, central defender, fullback, winger, inner midfielder, and forward roles.
 - The imported roster, draft lineup, formation, and tactic are saved in the app's macOS Application Support folder and restored at launch.
 
-The position estimates port the original `RatingPredictionModel` factors for normal player behaviour and include form, loyalty, experience, and stamina. The lineup optimizer maximizes the sum of these individual estimates for the selected formation; it is a useful draft, not a match result predictor. The estimates do not calculate collective sector ratings, weather effects, non-normal player behaviour, or opponent-specific match odds. The rest of the Java domain model, match orders, substitutions, and CHPP sync have not been ported or connected yet. Tactical choices currently update the saved draft in the interface and do not write a Hattrick match order.
+The estimates port the original `RatingPredictionModel` contribution factors for normal player behaviour, and include form, loyalty, experience, stamina, and the central-sector overcrowding penalties. Team-sector estimates assume neutral team factors because the HRF import does not yet provide all required match context. They omit coach style, team spirit, confidence, venue, weather, specialty effects, player orders, and opponent-specific match odds, so they are a lineup comparison aid rather than a full match prediction. The rest of the Java domain model, substitutions, and CHPP sync have not been ported or connected yet. Tactical choices currently update the saved draft in the interface and do not write a Hattrick match order.
 
 ## Local setup
 

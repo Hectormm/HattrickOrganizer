@@ -1,7 +1,7 @@
 import React, {useEffect, useMemo, useState} from 'react';
 import {NativeModules, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, View} from 'react-native';
 import {parseHrf, Player, Team} from './hrf';
-import {getPlayerPositionEstimate, positionGroups} from './positionRatings';
+import {estimateLineupSectors, getPlayerPositionEstimate, positionGroups} from './positionRatings';
 import {getPlayerSlotEstimate, optimizeLineup} from './lineupOptimizer';
 
 type Tab = 'Plantilla' | 'Alineación' | 'Team Analyzer';
@@ -19,6 +19,15 @@ const skillMetrics: {key: keyof Player; label: string}[] = [
   {key: 'winger', label: 'Lateral'},
   {key: 'scoring', label: 'Anotación'},
 ];
+const lineupSectors = [
+  {key: 'midfield', label: 'Mediocampo'},
+  {key: 'defenceLeft', label: 'Defensa izquierda'},
+  {key: 'defenceCentral', label: 'Defensa central'},
+  {key: 'defenceRight', label: 'Defensa derecha'},
+  {key: 'attackLeft', label: 'Ataque izquierda'},
+  {key: 'attackCentral', label: 'Ataque central'},
+  {key: 'attackRight', label: 'Ataque derecha'},
+] as const;
 
 function formationRows(formation: Formation): string[][] {
   const [defenders, midfielders, forwards] = formation.split('-').map(Number);
@@ -72,6 +81,7 @@ export default function App() {
   const [storageReady, setStorageReady] = useState(false);
   const rows = useMemo(() => formationRows(formation), [formation]);
   const slots = useMemo(() => rows.flat(), [rows]);
+  const sectorRatings = useMemo(() => team ? estimateLineupSectors(team.players, lineup, slots) : null, [team, lineup, slots]);
   const assignedElsewhere = new Set(Object.entries(lineup).filter(([slot]) => slot !== activeSlot).map(([, playerId]) => playerId));
 
   useEffect(() => {
@@ -151,7 +161,7 @@ export default function App() {
     const result = optimizeLineup(team.players, slots);
     setLineup(result.assignments);
     setActiveSlot(null);
-    setLineupMessage(`${Object.keys(result.assignments).length}/${slots.length} puestos cubiertos · ${result.totalRating.toFixed(1)}★ individuales`);
+    setLineupMessage(`${Object.keys(result.assignments).length}/${slots.length} puestos cubiertos · suma de sectores ${result.totalRating.toFixed(1)}★`);
   };
 
   return (
@@ -221,6 +231,20 @@ export default function App() {
                 ))}
               </View>
               <Text style={styles.caption}>{Object.keys(lineup).length} de {slots.length} posiciones asignadas</Text>
+              {sectorRatings && Object.keys(lineup).length > 0 ? (
+                <View style={styles.sectorCard}>
+                  <Text style={styles.sectionTitle}>Ratings estimados del once</Text>
+                  <Text style={styles.caption}>Órdenes normales; estimación sin clima ni factores colectivos del equipo.</Text>
+                  <View style={styles.sectorGrid}>
+                    {lineupSectors.map(sector => (
+                      <View key={sector.key} style={styles.sectorRow}>
+                        <Text style={styles.metricName}>{sector.label}</Text>
+                        <Text style={styles.metricValue}>{sectorRatings[sector.key].toFixed(1)}★</Text>
+                      </View>
+                    ))}
+                  </View>
+                </View>
+              ) : null}
               {activeSlot ? (
                 <View style={styles.picker}>
                   <Text style={styles.sectionTitle}>Elige jugador · {activeSlot}</Text>
@@ -300,6 +324,9 @@ const styles = StyleSheet.create({
   positionDot: {color: '#267550', fontSize: 17},
   positionText: {marginTop: 3, color: '#35584a', fontSize: 11, textAlign: 'center'},
   caption: {marginTop: 9, color: '#758995', fontSize: 12},
+  sectorCard: {marginTop: 14, padding: 14, borderRadius: 10, backgroundColor: '#f6f8f9'},
+  sectorGrid: {flexDirection: 'row', flexWrap: 'wrap', marginTop: 4},
+  sectorRow: {width: '50%', flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 8, paddingRight: 16},
   picker: {marginTop: 12, padding: 14, borderRadius: 10, backgroundColor: '#f6f8f9'},
   summary: {marginTop: 10, padding: 14, borderRadius: 9, backgroundColor: '#f3f7f9'},
   summaryLabel: {fontSize: 11, color: '#718591'},
