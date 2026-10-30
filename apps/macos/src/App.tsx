@@ -117,7 +117,8 @@ export default function App() {
   const [storageReady, setStorageReady] = useState(false);
   const rows = useMemo(() => formationRows(formation), [formation]);
   const slots = useMemo(() => rows.flat(), [rows]);
-  const opponentSlots = useMemo(() => formationRows(opponentFormation).flat(), [opponentFormation]);
+  const opponentRows = useMemo(() => formationRows(opponentFormation), [opponentFormation]);
+  const opponentSlots = useMemo(() => opponentRows.flat(), [opponentRows]);
   const opponentLineupResult = useMemo(() => opponentTeam ? optimizeLineup(opponentTeam.players, opponentSlots, opponentTactic) : null, [opponentTeam, opponentSlots, opponentTactic]);
   const opponentSectorRatings = useMemo(() => opponentTeam && opponentLineupResult
     ? estimateLineupSectors(opponentTeam.players, opponentLineupResult.assignments, opponentSlots, opponentTactic)
@@ -227,6 +228,7 @@ export default function App() {
   };
 
   const assignedName = (slot: string) => team?.players.find(player => player.id === lineup[slot])?.name;
+  const assignedOpponentName = (slot: string) => opponentTeam?.players.find(player => player.id === opponentLineupResult?.assignments[slot])?.name;
   const applyBestLineup = () => {
     if (!team) return;
     const result = optimizeLineup(team.players, slots, tactic, hasCompleteOpponentRatings ? parsedOpponentRatings : null);
@@ -379,6 +381,24 @@ export default function App() {
                   <Text style={styles.metricName}>Táctica estimada del rival</Text>
                   <View style={styles.choices}>{tactics.map(item => <Choice key={`opponent-${item}`} label={item} selected={opponentTactic === item} onPress={() => setOpponentTactic(item)} />)}</View>
                   <Text style={styles.caption}>Alineación estimada: {opponentLineupResult ? `${Object.keys(opponentLineupResult.assignments).length}/${opponentSlots.length} puestos` : '—'} · ratings calculados, no importados de un partido.</Text>
+                  <View style={styles.pitch}>
+                    {opponentRows.map((row, index) => (
+                      <View key={`opponent-row-${index}`} style={styles.row}>
+                        {row.map(slot => <Text key={slot} style={styles.opponentPosition}>{assignedOpponentName(slot) ?? slot}</Text>)}
+                      </View>
+                    ))}
+                  </View>
+                  {opponentSectorRatings ? (
+                    <View style={styles.sectorGrid}>
+                      {lineupSectors.map(sector => (
+                        <View key={`opponent-${sector.key}`} style={styles.sectorRow}>
+                          <Text style={styles.metricName}>{sector.label}</Text>
+                          <Text style={styles.metricValue}>{opponentSectorRatings[sector.key].toFixed(1)}★</Text>
+                        </View>
+                      ))}
+                    </View>
+                  ) : null}
+                  <Text style={styles.caption}>Estimación sin clima ni eventos del partido; Presionar no descuenta aquí la resistencia adicional.</Text>
                 </View>
               ) : null}
               <TextInput
@@ -488,6 +508,7 @@ const styles = StyleSheet.create({
   caption: {marginTop: 9, color: '#758995', fontSize: 12},
   sectorCard: {marginTop: 14, padding: 14, borderRadius: 10, backgroundColor: '#f6f8f9'},
   opponentTeamCard: {marginTop: 14, padding: 14, borderRadius: 10, backgroundColor: '#f6f8f9'},
+  opponentPosition: {minWidth: 86, maxWidth: 150, alignItems: 'center', marginHorizontal: 4, padding: 5, borderRadius: 7, overflow: 'hidden', color: '#35584a', fontSize: 11, textAlign: 'center'},
   sectorGrid: {flexDirection: 'row', flexWrap: 'wrap', marginTop: 4},
   sectorRow: {width: '50%', flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 8, paddingRight: 16},
   picker: {marginTop: 12, padding: 14, borderRadius: 10, backgroundColor: '#f6f8f9'},
