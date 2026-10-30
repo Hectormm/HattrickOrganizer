@@ -20,7 +20,7 @@ type Side = 'left' | 'middle' | 'right';
 type SideRestriction = 'none' | 'thisSide' | 'middleOnly' | 'oppositeSide';
 type Skill = 'keeper' | 'defending' | 'playmaking' | 'passing' | 'winger' | 'scoring' | 'stamina' | 'experience';
 
-type Factor = [ContributionSet, Skill, Sector, SideRestriction, PlayerBehavior, number];
+type Factor = [ContributionSet, Skill, Sector, SideRestriction, PlayerBehavior, number, number?];
 type Position = {role: number; sector: Sector; side: Side};
 export type LineupSectorRatings = Record<RatingSector, number>;
 export type OpponentSectorRatings = Partial<Record<keyof LineupSectorRatings, number | null>>;
@@ -106,6 +106,7 @@ const factors: Factor[] = [
   ['sideAttack', 'passing', 'innerMidfield', 'middleOnly', 'Defensivo', 0.07],
   ['sideAttack', 'passing', 'forward', 'none', 'Normal', 0.14],
   ['sideAttack', 'passing', 'forward', 'none', 'Defensivo', 0.31],
+  ['sideAttack', 'passing', 'forward', 'none', 'Defensivo', 0.41, 1],
   ['sideAttack', 'passing', 'innerMidfield', 'thisSide', 'Normal', 0.26],
   ['sideAttack', 'passing', 'innerMidfield', 'thisSide', 'Ofensivo', 0.36],
   ['sideAttack', 'passing', 'innerMidfield', 'thisSide', 'Defensivo', 0.14],
@@ -186,6 +187,21 @@ function sideRestrictionAllows(position: Position, ratingSide: Side, restriction
   return false;
 }
 
+function positionSkillContribution(player: Player, position: Position, ratingSector: typeof ratingSectors[number], behavior: PlayerBehavior): number {
+  const selectedFactors = new Map<string, {skill: Skill; weight: number; specialtySpecific: boolean}>();
+  for (const [set, skill, playerSector, restriction, factorBehavior, weight, specialty] of factors) {
+    if (set !== ratingSector.set || playerSector !== position.sector || factorBehavior !== behavior || !sideRestrictionAllows(position, ratingSector.side, restriction)) continue;
+    const specialtySpecific = specialty !== undefined;
+    if (specialtySpecific && specialty !== player.specialty) continue;
+    const key = `${set}:${skill}:${playerSector}:${restriction}:${factorBehavior}`;
+    const existing = selectedFactors.get(key);
+    if (!existing || specialtySpecific || !existing.specialtySpecific) {
+      selectedFactors.set(key, {skill, weight, specialtySpecific});
+    }
+  }
+  return Array.from(selectedFactors.values()).reduce((sum, factor) => sum + playerStrength(player, factor.skill) * factor.weight, 0);
+}
+
 function experienceContribution(player: Player, factor: number): number {
   const experience = Math.max(0, (player.experience ?? 0) - 1);
   const k = -0.00000725 * experience ** 4 + 0.0005 * experience ** 3 - 0.01336 * experience ** 2 + 0.176 * experience;
@@ -200,9 +216,7 @@ function averageStaminaFactor(player: Player): number {
 function normalRating(player: Player, position: Position, behavior: PlayerBehavior = 'Normal'): number {
   let sum = 0;
   for (const sector of ratingSectors) {
-    const contribution = factors
-      .filter(([set, , playerSector, restriction, factorBehavior]) => set === sector.set && playerSector === position.sector && factorBehavior === behavior && sideRestrictionAllows(position, sector.side, restriction))
-      .reduce((total, [, skill, , , , weight]) => total + playerStrength(player, skill) * weight, 0);
+    const contribution = positionSkillContribution(player, position, sector, behavior);
     let sectorContribution = contribution;
     if (contribution > 0) sectorContribution += experienceContribution(player, sector.experience);
     sum += sectorContribution * sector.scale * (sector.key === 'midfield' ? 3 : 1);
@@ -266,9 +280,7 @@ export function estimateLineupSectors(players: Player[], lineup: Record<string, 
     if (position.sector === 'forward' && count >= 3) overcrowding = 0.865;
 
     for (const sector of ratingSectors) {
-      const contribution = factors
-        .filter(([set, , playerSector, restriction, factorBehavior]) => set === sector.set && playerSector === position.sector && factorBehavior === behavior && sideRestrictionAllows(position, sector.side, restriction))
-        .reduce((sum, [, skill, , , , weight]) => sum + playerStrength(player, skill) * weight, 0);
+      const contribution = positionSkillContribution(player, position, sector, behavior);
       if (contribution <= 0) continue;
       totals[sector.key] += (contribution * overcrowding + experienceContribution(player, sector.experience)) * averageStaminaFactor(player);
     }

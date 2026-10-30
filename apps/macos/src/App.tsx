@@ -70,6 +70,11 @@ function Choice({label, selected, disabled, onPress}: {label: string; selected?:
   );
 }
 
+function specialtyName(value: number | null): string {
+  const names: Record<number, string> = {1: 'Técnico', 2: 'Rápido', 3: 'Potente', 4: 'Imprevisible', 5: 'Cabeceador', 6: 'Resistente', 8: 'Apoyo'};
+  return value === null ? '—' : names[value] ?? 'Sin especialidad';
+}
+
 function average(players: Player[], key: keyof Player): string {
   const values = players.map(player => player[key]).filter((value): value is number => typeof value === 'number');
   return values.length ? (values.reduce((sum, value) => sum + value, 0) / values.length).toFixed(1) : '—';
@@ -332,7 +337,7 @@ export default function App() {
                 {team.players.map(player => (
                   <View key={player.id} style={styles.playerRow}>
                     <Text style={styles.playerName}>{player.name}</Text>
-                    <Text style={styles.playerSkills}>DEF {player.defending ?? '—'} · JUG {player.playmaking ?? '—'} · LAT {player.winger ?? '—'} · ANO {player.scoring ?? '—'}</Text>
+                    <Text style={styles.playerSkills}>DEF {player.defending ?? '—'} · JUG {player.playmaking ?? '—'} · LAT {player.winger ?? '—'} · ANO {player.scoring ?? '—'} · ESP {specialtyName(player.specialty)}</Text>
                   </View>
                 ))}
               </View>
@@ -420,7 +425,7 @@ export default function App() {
                     .map(({player, rating}) => {
                       const assignedSlot = Object.entries(lineup).find(([, playerId]) => playerId === player.id)?.[0];
                       const transfer = assignedSlot && assignedSlot !== activeSlot ? ` · intercambiar desde ${assignedSlot}` : '';
-                      return <Choice key={player.id} label={`${player.name} · ${rating.toFixed(1)}★ · DEF ${player.defending ?? '—'} · JUG ${player.playmaking ?? '—'} · ANO ${player.scoring ?? '—'}${transfer}`} selected={lineup[activeSlot] === player.id} onPress={() => {assignPlayerToSlot(activeSlot, player.id); setActiveSlot(null);}} />;
+                      return <Choice key={player.id} label={`${player.name} · ${rating.toFixed(1)}★ · DEF ${player.defending ?? '—'} · JUG ${player.playmaking ?? '—'} · ANO ${player.scoring ?? '—'} · ESP ${specialtyName(player.specialty)}${transfer}`} selected={lineup[activeSlot] === player.id} onPress={() => {assignPlayerToSlot(activeSlot, player.id); setActiveSlot(null);}} />;
                     })}
                   {!team ? <Text style={styles.muted}>Importa tu HRF desde Plantilla para elegir jugadores.</Text> : null}
                   <Choice label="Dejar posición vacía" onPress={() => {setLineup(previous => {const next = {...previous}; delete next[activeSlot]; return next;}); setActiveSlot(null);}} />
