@@ -1,0 +1,5 @@
+node_modules/
+macos/Pods/
+macos/build/
+macos/*.xcworkspace
+.DS_Store
