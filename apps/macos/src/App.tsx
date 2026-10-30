@@ -2,7 +2,7 @@ import React, {useEffect, useMemo, useState} from 'react';
 import {NativeModules, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, View} from 'react-native';
 import {parseHrf, Player, Team} from './hrf';
 import {estimateLineupSectors, estimateTacticLevel, getPlayerPositionEstimate, positionGroups, RatingTactic} from './positionRatings';
-import {getPlayerSlotEstimate, optimizeLineup} from './lineupOptimizer';
+import {getBenchSuggestions, getPlayerSlotEstimate, optimizeLineup} from './lineupOptimizer';
 
 type Tab = 'Plantilla' | 'Alineación' | 'Team Analyzer';
 type Formation = '3-5-2' | '4-4-2' | '4-5-1' | '5-3-2' | '3-4-3';
@@ -83,6 +83,7 @@ export default function App() {
   const slots = useMemo(() => rows.flat(), [rows]);
   const sectorRatings = useMemo(() => team ? estimateLineupSectors(team.players, lineup, slots, tactic) : null, [team, lineup, slots, tactic]);
   const tacticLevel = useMemo(() => team ? estimateTacticLevel(team.players, lineup, slots, tactic) : null, [team, lineup, slots, tactic]);
+  const benchSuggestions = useMemo(() => team ? getBenchSuggestions(team.players, lineup, slots, tactic) : [], [team, lineup, slots, tactic]);
   const assignedElsewhere = new Set(Object.entries(lineup).filter(([slot]) => slot !== activeSlot).map(([, playerId]) => playerId));
 
   useEffect(() => {
@@ -255,6 +256,17 @@ export default function App() {
                     : tactic === 'Presionar'
                       ? 'Cálculo HO al minuto 90 con defensa, forma, experiencia, fidelidad, resistencia y especialidad Potente; asume clima neutro.'
                       : 'Cálculo HO con el nivel de Pases de los diez jugadores de campo.'}</Text>
+                </View>
+              ) : null}
+              {team && Object.keys(lineup).length > 0 && team.players.some(player => !Object.values(lineup).includes(player.id)) ? (
+                <View style={styles.sectorCard}>
+                  <Text style={styles.sectionTitle}>Cambios que mejoran el once</Text>
+                  <Text style={styles.caption}>Mejoran la suma de los siete ratings estimados con la táctica seleccionada.</Text>
+                  {benchSuggestions.length ? benchSuggestions.map(suggestion => {
+                    const outgoing = team.players.find(player => player.id === suggestion.outgoingPlayerId)?.name ?? 'Vacío';
+                    const incoming = team.players.find(player => player.id === suggestion.incomingPlayerId)?.name ?? 'Jugador';
+                    return <Choice key={`${suggestion.slot}-${suggestion.incomingPlayerId}`} label={`${suggestion.slot}: ${outgoing} → ${incoming} · +${suggestion.gain.toFixed(2)}★`} onPress={() => setLineup(previous => ({...previous, [suggestion.slot]: suggestion.incomingPlayerId}))} />;
+                  }) : <Text style={styles.muted}>Ningún cambio de un suplente mejora la suma estimada.</Text>}
                 </View>
               ) : null}
               {activeSlot ? (

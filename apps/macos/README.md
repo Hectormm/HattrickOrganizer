@@ -3,7 +3,7 @@
 This React Native for macOS prototype currently implements three screens:
 
 - **Plantilla** opens an `.hrf` file with the native macOS file picker (or accepts pasted text) and reads the team name, first-team players, and player skills.
-- **Alineación** supports five formations, player assignment to exact Hattrick role groups, and match tactic selection. “Calcular mejor once” starts with a one-to-one player assignment and refines it against the sum of seven estimated team-sector ratings; no player is selected twice and slots stay empty when the imported squad has fewer than eleven players. The screen displays the seven estimates for the current draft lineup.
+- **Alineación** supports five formations, player assignment to exact Hattrick role groups, and match tactic selection. “Calcular mejor once” starts with a one-to-one player assignment and refines it against the sum of seven estimated team-sector ratings; no player is selected twice and slots stay empty when the imported squad has fewer than eleven players. The screen displays the seven estimates for the current draft lineup and up to three beneficial swaps from the bench.
 - **Team Analyzer** calculates squad skill averages and ranks three player profiles for goalkeeper, central defender, fullback, winger, inner midfielder, and forward roles.
 - The imported roster, draft lineup, formation, and tactic are saved in the app's macOS Application Support folder and restored at launch.
 

@@ -2,9 +2,35 @@ import {Player} from './hrf';
 import {estimateLineupSectors, getPlayerRoleEstimate, getRoleIdForSlot, RatingTactic} from './positionRatings';
 
 type LineupResult = {assignments: Record<string, string>; totalRating: number};
+export type BenchSuggestion = {slot: string; outgoingPlayerId: string | null; incomingPlayerId: string; gain: number};
 
 export function getPlayerSlotEstimate(player: Player, slot: string, slots: string[]): number {
   return getPlayerRoleEstimate(player, getRoleIdForSlot(slot, slots));
+}
+
+export function getBenchSuggestions(players: Player[], lineup: Record<string, string>, slots: string[], tactic: RatingTactic): BenchSuggestion[] {
+  const assignedIds = new Set(Object.values(lineup));
+  const bench = players.filter(player => !assignedIds.has(player.id));
+  if (!bench.length) return [];
+
+  const sectorScore = (candidate: Record<string, string>) =>
+    Object.values(estimateLineupSectors(players, candidate, slots, tactic)).reduce((sum, rating) => sum + rating, 0);
+  const currentScore = sectorScore(lineup);
+  const candidates = slots.flatMap(slot => bench.flatMap(player => {
+    const outgoingPlayerId = lineup[slot] ?? null;
+    const candidate = {...lineup, [slot]: player.id};
+    const gain = sectorScore(candidate) - currentScore;
+    return gain > 1e-6 ? [{slot, outgoingPlayerId, incomingPlayerId: player.id, gain}] : [];
+  })).sort((a, b) => b.gain - a.gain);
+
+  const usedSlots = new Set<string>();
+  const usedPlayers = new Set<string>();
+  return candidates.filter(suggestion => {
+    if (usedSlots.has(suggestion.slot) || usedPlayers.has(suggestion.incomingPlayerId)) return false;
+    usedSlots.add(suggestion.slot);
+    usedPlayers.add(suggestion.incomingPlayerId);
+    return true;
+  }).slice(0, 3);
 }
 
 /** Maximum-weight one-to-one assignment using the Hungarian algorithm. */
