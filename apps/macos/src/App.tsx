@@ -103,19 +103,31 @@ export default function App() {
   const [formation, setFormation] = useState<Formation>('3-5-2');
   const [tactic, setTactic] = useState<Tactic>('Normal');
   const [team, setTeam] = useState<Team | null>(null);
+  const [opponentTeam, setOpponentTeam] = useState<Team | null>(null);
+  const [opponentFormation, setOpponentFormation] = useState<Formation>('3-5-2');
+  const [opponentTactic, setOpponentTactic] = useState<Tactic>('Normal');
   const [opponentName, setOpponentName] = useState('');
   const [opponentRatings, setOpponentRatings] = useState<OpponentRatings>({...emptyOpponentRatings});
   const [hrfText, setHrfText] = useState('');
   const [importMessage, setImportMessage] = useState('');
+  const [opponentImportMessage, setOpponentImportMessage] = useState('');
   const [lineupMessage, setLineupMessage] = useState('');
   const [lineup, setLineup] = useState<Record<string, string>>({});
   const [activeSlot, setActiveSlot] = useState<string | null>(null);
   const [storageReady, setStorageReady] = useState(false);
   const rows = useMemo(() => formationRows(formation), [formation]);
   const slots = useMemo(() => rows.flat(), [rows]);
+  const opponentSlots = useMemo(() => formationRows(opponentFormation).flat(), [opponentFormation]);
+  const opponentLineupResult = useMemo(() => opponentTeam ? optimizeLineup(opponentTeam.players, opponentSlots, opponentTactic) : null, [opponentTeam, opponentSlots, opponentTactic]);
+  const opponentSectorRatings = useMemo(() => opponentTeam && opponentLineupResult
+    ? estimateLineupSectors(opponentTeam.players, opponentLineupResult.assignments, opponentSlots, opponentTactic)
+    : null, [opponentTeam, opponentLineupResult, opponentSlots, opponentTactic]);
   const sectorRatings = useMemo(() => team ? estimateLineupSectors(team.players, lineup, slots, tactic) : null, [team, lineup, slots, tactic]);
   const tacticLevel = useMemo(() => team ? estimateTacticLevel(team.players, lineup, slots, tactic) : null, [team, lineup, slots, tactic]);
-  const parsedOpponentRatings = useMemo(() => Object.fromEntries(Object.entries(opponentRatings).map(([key, value]) => [key, parseRatingInput(value)])) as OpponentSectorRatings, [opponentRatings]);
+  const parsedOpponentRatings = useMemo(() => Object.fromEntries(Object.keys(emptyOpponentRatings).map(key => {
+    const manualRating = parseRatingInput(opponentRatings[key as RatingKey]);
+    return [key, manualRating ?? opponentSectorRatings?.[key as RatingKey] ?? null];
+  })) as OpponentSectorRatings, [opponentRatings, opponentSectorRatings]);
   const hasCompleteOpponentRatings = Object.keys(emptyOpponentRatings).every(key => typeof parsedOpponentRatings[key as RatingKey] === 'number');
   const hasAnyOpponentRatings = Object.values(parsedOpponentRatings).some(value => typeof value === 'number');
   const benchSuggestions = useMemo(() => team ? getBenchSuggestions(team.players, lineup, slots, tactic, hasCompleteOpponentRatings ? parsedOpponentRatings : null) : [], [team, lineup, slots, tactic, hasCompleteOpponentRatings, parsedOpponentRatings]);
@@ -131,12 +143,18 @@ export default function App() {
     let mounted = true;
     storage.loadState().then((saved: unknown) => {
       if (!mounted || !saved || typeof saved !== 'object') return;
-      const state = saved as {team?: unknown; formation?: unknown; tactic?: unknown; lineup?: unknown; opponentName?: unknown; opponentRatings?: unknown};
+      const state = saved as {team?: unknown; formation?: unknown; tactic?: unknown; lineup?: unknown; opponentTeam?: unknown; opponentFormation?: unknown; opponentTactic?: unknown; opponentName?: unknown; opponentRatings?: unknown};
       const savedTeam = isTeam(state.team) ? state.team : null;
+      const savedOpponentTeam = isTeam(state.opponentTeam) ? state.opponentTeam : null;
       const savedFormation = formations.includes(state.formation as Formation) ? state.formation as Formation : '3-5-2';
       const savedTactic = tactics.includes(state.tactic as Tactic) ? state.tactic as Tactic : 'Normal';
+      const savedOpponentFormation = formations.includes(state.opponentFormation as Formation) ? state.opponentFormation as Formation : '3-5-2';
+      const savedOpponentTactic = tactics.includes(state.opponentTactic as Tactic) ? state.opponentTactic as Tactic : 'Normal';
 
       setTeam(savedTeam);
+      setOpponentTeam(savedOpponentTeam);
+      setOpponentFormation(savedOpponentFormation);
+      setOpponentTactic(savedOpponentTactic);
       setOpponentName(typeof state.opponentName === 'string' ? state.opponentName : '');
       setOpponentRatings(readOpponentRatings(state.opponentRatings));
       setFormation(savedFormation);
@@ -158,10 +176,10 @@ export default function App() {
 
   useEffect(() => {
     if (!storageReady || !NativeModules.HOStorage) return;
-    NativeModules.HOStorage.saveState({team, lineup, formation, tactic, opponentName, opponentRatings}).catch((error: unknown) => {
+    NativeModules.HOStorage.saveState({team, lineup, formation, tactic, opponentTeam, opponentFormation, opponentTactic, opponentName, opponentRatings}).catch((error: unknown) => {
       console.warn('No se pudieron guardar los datos de HO.', error);
     });
-  }, [storageReady, team, lineup, formation, tactic, opponentName, opponentRatings]);
+  }, [storageReady, team, lineup, formation, tactic, opponentTeam, opponentFormation, opponentTactic, opponentName, opponentRatings]);
 
   const chooseFormation = (next: Formation) => {
     setFormation(next);
@@ -191,6 +209,20 @@ export default function App() {
       }
     } catch (error) {
       setImportMessage(error instanceof Error ? error.message : 'No se pudo abrir el archivo HRF.');
+    }
+  };
+
+  const openOpponentHrfFile = async () => {
+    try {
+      const source: string | null = await NativeModules.HODocumentPicker.pickHRF();
+      if (!source) return;
+      const imported = parseHrf(source);
+      setOpponentTeam(imported);
+      setOpponentName(imported.name);
+      setOpponentRatings({...emptyOpponentRatings});
+      setOpponentImportMessage(`${imported.players.length} jugadores importados · ${imported.name}`);
+    } catch (error) {
+      setOpponentImportMessage(error instanceof Error ? error.message : 'No se pudo abrir el HRF del rival.');
     }
   };
 
@@ -336,6 +368,19 @@ export default function App() {
             <View style={styles.card}>
               <Text style={styles.cardTitle}>Comparativa de ratings</Text>
               <Text style={styles.muted}>{team ? `${team.name} · alineación ${formation} · ${tactic}` : 'Importa tu HRF y configura una alineación para calcular tus ratings.'}</Text>
+              <Choice label={opponentTeam ? 'Cambiar HRF del rival…' : 'Importar HRF del rival…'} onPress={openOpponentHrfFile} />
+              {opponentImportMessage ? <Text style={styles.importMessage}>{opponentImportMessage}</Text> : null}
+              {opponentTeam ? (
+                <View style={styles.opponentTeamCard}>
+                  <Text style={styles.cardTitle}>{opponentTeam.name} · {opponentTeam.players.length} jugadores</Text>
+                  <Text style={styles.caption}>Se estima su mejor once y sus siete ratings con los datos de la plantilla.</Text>
+                  <Text style={styles.metricName}>Formación del rival</Text>
+                  <View style={styles.choices}>{formations.map(item => <Choice key={`opponent-${item}`} label={item} selected={opponentFormation === item} onPress={() => setOpponentFormation(item)} />)}</View>
+                  <Text style={styles.metricName}>Táctica estimada del rival</Text>
+                  <View style={styles.choices}>{tactics.map(item => <Choice key={`opponent-${item}`} label={item} selected={opponentTactic === item} onPress={() => setOpponentTactic(item)} />)}</View>
+                  <Text style={styles.caption}>Alineación estimada: {opponentLineupResult ? `${Object.keys(opponentLineupResult.assignments).length}/${opponentSlots.length} puestos` : '—'} · ratings calculados, no importados de un partido.</Text>
+                </View>
+              ) : null}
               <TextInput
                 accessibilityLabel="Nombre del rival"
                 onChangeText={setOpponentName}
@@ -345,7 +390,7 @@ export default function App() {
                 value={opponentName}
               />
               <Text style={styles.sectionTitle}>Ratings del rival</Text>
-              <Text style={styles.caption}>Introduce los ratings defensivos y ofensivos del Team Analyzer clásico para compararlos con tu alineación.</Text>
+              <Text style={styles.caption}>{opponentTeam ? 'Los ratings se estiman desde el HRF; cualquier valor manual sustituye ese sector.' : 'Introduce los ratings defensivos y ofensivos del Team Analyzer clásico para compararlos con tu alineación.'}</Text>
               <View style={styles.opponentInputGrid}>
                 {lineupSectors.map(sector => (
                   <View key={sector.key} style={styles.opponentInputRow}>
@@ -353,7 +398,7 @@ export default function App() {
                     <TextInput
                       accessibilityLabel={`Rating rival ${sector.label}`}
                       onChangeText={value => setOpponentRatings(previous => ({...previous, [sector.key]: value}))}
-                      placeholder="—"
+                      placeholder={opponentSectorRatings?.[sector.key]?.toFixed(1) ?? '—'}
                       placeholderTextColor="#91a1aa"
                       style={styles.opponentRatingInput}
                       value={opponentRatings[sector.key]}
@@ -364,7 +409,7 @@ export default function App() {
               <Text style={styles.sectionTitle}>Ventaja por sector</Text>
               {ratingMatchups.map(matchup => {
                 const own = Object.keys(lineup).length ? sectorRatings?.[matchup.key] : undefined;
-                const opponent = parseRatingInput(opponentRatings[matchup.opponentKey]);
+                const opponent = parsedOpponentRatings[matchup.opponentKey] ?? null;
                 const total = (own ?? 0) + (opponent ?? 0);
                 const advantage = own !== undefined && opponent !== null && total > 0 ? Math.round((own / total) * 100) : null;
                 const difference = own !== undefined && opponent !== null ? own - opponent : null;
@@ -442,6 +487,7 @@ const styles = StyleSheet.create({
   positionText: {marginTop: 3, color: '#35584a', fontSize: 11, textAlign: 'center'},
   caption: {marginTop: 9, color: '#758995', fontSize: 12},
   sectorCard: {marginTop: 14, padding: 14, borderRadius: 10, backgroundColor: '#f6f8f9'},
+  opponentTeamCard: {marginTop: 14, padding: 14, borderRadius: 10, backgroundColor: '#f6f8f9'},
   sectorGrid: {flexDirection: 'row', flexWrap: 'wrap', marginTop: 4},
   sectorRow: {width: '50%', flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 8, paddingRight: 16},
   picker: {marginTop: 12, padding: 14, borderRadius: 10, backgroundColor: '#f6f8f9'},
