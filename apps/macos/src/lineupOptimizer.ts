@@ -37,8 +37,8 @@ function scoreLineup(ratings: LineupSectorRatings, opponentRatings?: OpponentSec
   return weightedShare / totalWeight;
 }
 
-export function getPlayerSlotEstimate(player: Player, slot: string, slots: string[], behaviors: Record<string, PlayerBehavior> = {}, weather: MatchWeather = 'Neutro'): number {
-  return getPlayerRoleEstimate(player, getRoleIdForSlot(slot, slots), behaviors[slot] ?? 'Normal', weather);
+export function getPlayerSlotEstimate(player: Player, slot: string, slots: string[], behaviors: Record<string, PlayerBehavior> = {}, weather: MatchWeather = 'Neutro', tactic: RatingTactic = 'Normal'): number {
+  return getPlayerRoleEstimate(player, getRoleIdForSlot(slot, slots), behaviors[slot] ?? 'Normal', weather, tactic);
 }
 
 export function getBenchSuggestions(players: Player[], lineup: Record<string, string>, slots: string[], tactic: RatingTactic, opponentRatings?: OpponentSectorRatings | null, behaviors: Record<string, PlayerBehavior> = {}, weather: MatchWeather = 'Neutro'): BenchSuggestion[] {
@@ -73,7 +73,7 @@ export function optimizeLineup(players: Player[], slots: string[], tactic: Ratin
   const realColumns = players.length;
   const columns = Math.max(rows, realColumns);
   const weights = slots.map(slot => [
-    ...players.map(player => getPlayerSlotEstimate(player, slot, slots, behaviors, weather)),
+    ...players.map(player => getPlayerSlotEstimate(player, slot, slots, behaviors, weather, tactic)),
     ...Array.from({length: columns - realColumns}, () => 0),
   ]);
 

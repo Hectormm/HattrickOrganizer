@@ -151,7 +151,7 @@ export default function App() {
     ? estimateLineupSectors(opponentTeam.players, opponentLineupResult.assignments, opponentSlots, opponentTactic, opponentLineupResult.behaviors, weather)
     : null, [opponentTeam, opponentLineupResult, opponentSlots, opponentTactic, weather]);
   const sectorRatings = useMemo(() => team ? estimateLineupSectors(team.players, lineup, slots, tactic, behaviors, weather) : null, [team, lineup, slots, tactic, behaviors, weather]);
-  const tacticLevel = useMemo(() => team ? estimateTacticLevel(team.players, lineup, slots, tactic) : null, [team, lineup, slots, tactic]);
+  const tacticLevel = useMemo(() => team ? estimateTacticLevel(team.players, lineup, slots, tactic, weather) : null, [team, lineup, slots, tactic, weather]);
   const parsedOpponentRatings = useMemo(() => Object.fromEntries(Object.keys(emptyOpponentRatings).map(key => {
     const manualRating = parseRatingInput(opponentRatings[key as RatingKey]);
     return [key, manualRating ?? opponentSectorRatings?.[key as RatingKey] ?? null];
@@ -161,13 +161,17 @@ export default function App() {
   const benchSuggestions = useMemo(() => team ? getBenchSuggestions(team.players, lineup, slots, tactic, hasCompleteOpponentRatings ? parsedOpponentRatings : null, behaviors, weather) : [], [team, lineup, slots, tactic, hasCompleteOpponentRatings, parsedOpponentRatings, behaviors, weather]);
   const formationRecommendations = useMemo(() => {
     if (!team || !hasCompleteOpponentRatings || activeTab !== 'Alineación') return [];
-    return formations.map(candidateFormation => {
+    return formations.flatMap(candidateFormation => {
       const candidateSlots = formationRows(candidateFormation).flat();
-      const result = optimizeLineup(team.players, candidateSlots, tactic, parsedOpponentRatings, behaviors, weather);
-      return {formation: candidateFormation, slots: candidateSlots, result};
+      return tactics.map(candidateTactic => ({
+        formation: candidateFormation,
+        tactic: candidateTactic,
+        slots: candidateSlots,
+        result: optimizeLineup(team.players, candidateSlots, candidateTactic, parsedOpponentRatings, {}, weather),
+      }));
     }).filter(recommendation => recommendation.result.matchupScore !== null)
       .sort((a, b) => (b.result.matchupScore ?? 0) - (a.result.matchupScore ?? 0));
-  }, [team, hasCompleteOpponentRatings, activeTab, tactic, parsedOpponentRatings, behaviors, weather]);
+  }, [team, hasCompleteOpponentRatings, activeTab, parsedOpponentRatings, weather]);
 
   useEffect(() => {
     const storage = NativeModules.HOStorage;
@@ -294,12 +298,13 @@ export default function App() {
   };
   const applyFormationRecommendation = (recommendation: (typeof formationRecommendations)[number]) => {
     setFormation(recommendation.formation);
+    setTactic(recommendation.tactic);
     setLineup(recommendation.result.assignments);
     setBehaviors(recommendation.result.behaviors);
     setActiveSlot(null);
     const score = recommendation.result.matchupScore;
     const coverage = `${Object.keys(recommendation.result.assignments).length}/${recommendation.slots.length} puestos cubiertos`;
-    setLineupMessage(`${recommendation.formation} · ${coverage} · índice de ventaja ${Math.round((score ?? 0) * 100)}% orientativo${opponentName.trim() ? ` contra ${opponentName.trim()}` : ''}`);
+    setLineupMessage(`${recommendation.formation} · ${recommendation.tactic} · ${coverage} · índice de ventaja ${Math.round((score ?? 0) * 100)}% orientativo${opponentName.trim() ? ` contra ${opponentName.trim()}` : ''}`);
   };
 
   return (
@@ -354,10 +359,10 @@ export default function App() {
               <Text style={styles.muted}>{team ? `${team.name} · toca una posición para asignar un jugador.` : 'Importa tu HRF desde Plantilla para asignar a tus jugadores.'}</Text>
               {formationRecommendations.length ? (
                 <View style={styles.sectorCard}>
-                  <Text style={styles.sectionTitle}>Mejores formaciones frente al rival</Text>
-                  <Text style={styles.caption}>Se optimiza el once para cada esquema con la táctica actual.</Text>
+                  <Text style={styles.sectionTitle}>Mejores esquemas y tácticas frente al rival</Text>
+                  <Text style={styles.caption}>Compara 25 combinaciones de formación y táctica con los siete ratings disponibles. El índice es orientativo, no una predicción del marcador.</Text>
                   {formationRecommendations.slice(0, 3).map(recommendation => (
-                    <Choice key={`recommend-${recommendation.formation}`} label={`${recommendation.formation} · ${Math.round((recommendation.result.matchupScore ?? 0) * 100)}% de ventaja orientativa · aplicar once`} selected={formation === recommendation.formation} onPress={() => applyFormationRecommendation(recommendation)} />
+                    <Choice key={`recommend-${recommendation.formation}-${recommendation.tactic}`} label={`${recommendation.formation} · ${recommendation.tactic} · ${Math.round((recommendation.result.matchupScore ?? 0) * 100)}% de rating relativo · aplicar` } selected={formation === recommendation.formation && tactic === recommendation.tactic} onPress={() => applyFormationRecommendation(recommendation)} />
                   ))}
                 </View>
               ) : null}
@@ -423,7 +428,7 @@ export default function App() {
                   <View style={styles.choices}>{getBehaviorsForSlot(activeSlot, slots).map(behavior => <Choice key={behavior} label={behavior} selected={(behaviors[activeSlot] ?? 'Normal') === behavior} onPress={() => setBehaviors(previous => ({...previous, [activeSlot]: behavior}))} />)}</View>
                   <Text style={styles.sectionTitle}>Elige jugador · {activeSlot}</Text>
                   {team?.players
-                    .map(player => ({player, rating: getPlayerSlotEstimate(player, activeSlot, slots, behaviors, weather)}))
+                    .map(player => ({player, rating: getPlayerSlotEstimate(player, activeSlot, slots, behaviors, weather, tactic)}))
                     .sort((a, b) => b.rating - a.rating)
                     .map(({player, rating}) => {
                       const assignedSlot = Object.entries(lineup).find(([, playerId]) => playerId === player.id)?.[0];
@@ -543,7 +548,7 @@ export default function App() {
                   <View key={group.key} style={styles.rankingGroup}>
                     <Text style={styles.metricName}>{group.label}</Text>
                     {team.players
-                      .map(player => ({player, rating: getPlayerPositionEstimate(player, group.key, weather)}))
+                      .map(player => ({player, rating: getPlayerPositionEstimate(player, group.key, weather, tactic)}))
                       .sort((a, b) => b.rating - a.rating)
                       .slice(0, 3)
                       .map(({player, rating}, index) => (
