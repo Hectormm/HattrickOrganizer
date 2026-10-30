@@ -83,7 +83,22 @@ export function optimizeLineup(players: Player[], slots: string[], tactic: Ratin
     let bestAssignments = assignments;
     for (let i = 0; i < slots.length; i += 1) {
       for (let j = i + 1; j < slots.length; j += 1) {
-        const candidate = {...assignments, [slots[i]]: assignments[slots[j]], [slots[j]]: assignments[slots[i]]};
+        const leftSlot = slots[i];
+        const rightSlot = slots[j];
+        const leftPlayer = assignments[leftSlot];
+        const rightPlayer = assignments[rightSlot];
+        if (!leftPlayer && !rightPlayer) continue;
+        const candidate = {...assignments};
+        if (leftPlayer && rightPlayer) {
+          candidate[leftSlot] = rightPlayer;
+          candidate[rightSlot] = leftPlayer;
+        } else if (leftPlayer) {
+          candidate[rightSlot] = leftPlayer;
+          delete candidate[leftSlot];
+        } else if (rightPlayer) {
+          candidate[leftSlot] = rightPlayer;
+          delete candidate[rightSlot];
+        }
         const score = sectorScore(candidate);
         if (score > bestScore + 1e-6) {
           bestScore = score;
