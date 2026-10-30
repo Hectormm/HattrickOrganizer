@@ -1,7 +1,7 @@
 import React, {useEffect, useMemo, useState} from 'react';
 import {NativeModules, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, View} from 'react-native';
 import {parseHrf, Player, Team} from './hrf';
-import {estimateLineupSectors, getPlayerPositionEstimate, positionGroups, RatingTactic} from './positionRatings';
+import {estimateLineupSectors, estimatePressingLevel, getPlayerPositionEstimate, positionGroups, RatingTactic} from './positionRatings';
 import {getPlayerSlotEstimate, optimizeLineup} from './lineupOptimizer';
 
 type Tab = 'Plantilla' | 'Alineación' | 'Team Analyzer';
@@ -82,6 +82,7 @@ export default function App() {
   const rows = useMemo(() => formationRows(formation), [formation]);
   const slots = useMemo(() => rows.flat(), [rows]);
   const sectorRatings = useMemo(() => team ? estimateLineupSectors(team.players, lineup, slots, tactic) : null, [team, lineup, slots, tactic]);
+  const pressingLevel = useMemo(() => team ? estimatePressingLevel(team.players, lineup, slots) : null, [team, lineup, slots]);
   const assignedElsewhere = new Set(Object.entries(lineup).filter(([slot]) => slot !== activeSlot).map(([, playerId]) => playerId));
 
   useEffect(() => {
@@ -234,7 +235,7 @@ export default function App() {
               {sectorRatings && Object.keys(lineup).length > 0 ? (
                 <View style={styles.sectorCard}>
                   <Text style={styles.sectionTitle}>Ratings estimados del once</Text>
-                  <Text style={styles.caption}>Incluye el modificador sectorial de la táctica cuando aplica. No incluye clima, entrenador, confianza ni espíritu; Presionar afecta las ocasiones, no estos siete ratings.</Text>
+                  <Text style={styles.caption}>Incluye el modificador sectorial de la táctica cuando aplica. No incluye clima, entrenador, confianza, espíritu ni el gasto adicional de resistencia de Presionar.</Text>
                   <View style={styles.sectorGrid}>
                     {lineupSectors.map(sector => (
                       <View key={sector.key} style={styles.sectorRow}>
@@ -243,6 +244,13 @@ export default function App() {
                       </View>
                     ))}
                   </View>
+                </View>
+              ) : null}
+              {pressingLevel !== null && tactic === 'Presionar' && Object.keys(lineup).length > 0 ? (
+                <View style={styles.sectorCard}>
+                  <Text style={styles.sectionTitle}>Presionar · nivel de táctica estimado</Text>
+                  <Text style={styles.metricValue}>{pressingLevel.toFixed(2)}</Text>
+                  <Text style={styles.caption}>Estimación HO al minuto 90 con defensa, forma, experiencia, fidelidad, resistencia y especialidad Potente. Asume clima neutro.</Text>
                 </View>
               ) : null}
               {activeSlot ? (

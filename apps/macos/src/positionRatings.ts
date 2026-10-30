@@ -16,7 +16,7 @@ type RatingSector = 'defenceLeft' | 'defenceCentral' | 'defenceRight' | 'midfiel
 type ContributionSet = 'sideDefence' | 'centralDefence' | 'midfield' | 'sideAttack' | 'centralAttack';
 type Side = 'left' | 'middle' | 'right';
 type SideRestriction = 'none' | 'thisSide' | 'middleOnly';
-type Skill = 'keeper' | 'defending' | 'playmaking' | 'passing' | 'winger' | 'scoring';
+type Skill = 'keeper' | 'defending' | 'playmaking' | 'passing' | 'winger' | 'scoring' | 'stamina' | 'experience';
 
 type Factor = [ContributionSet, Skill, Sector, SideRestriction, number];
 type Position = {role: number; sector: Sector; side: Side};
@@ -206,4 +206,48 @@ export function getPlayerPositionEstimate(player: Player, group: PositionGroup):
 export function getPlayerRoleEstimate(player: Player, roleId: number): number {
   const position = positions.find(candidate => candidate.role === roleId);
   return position ? normalRating(player, position) : 0;
+}
+
+function matchStaminaFactor(player: Player, minute: number, pressing: boolean): number {
+  const skill = skillValue(player, 'stamina');
+  const tacticFactor = pressing ? 1.1 : 1;
+  const initial = skill < 7
+    ? 102 + (23 / 7) * skill
+    : 125 + ((skill - 7) * 100) / 7;
+  const lossPerFiveMinutes = skill < 7
+    ? tacticFactor * ((27 / 70) * skill - 5.95)
+    : -3.25 * tacticFactor;
+  let stamina = initial;
+  const firstHalfEnd = Math.min(45, minute);
+  if (firstHalfEnd > 0) stamina += firstHalfEnd * lossPerFiveMinutes / 5;
+  if (minute >= 45) {
+    stamina = Math.min(initial, stamina + 18.75);
+    const secondHalfStart = 45;
+    const secondHalfEnd = Math.min(90, minute);
+    if (secondHalfStart < secondHalfEnd) stamina += (secondHalfEnd - secondHalfStart) * lossPerFiveMinutes / 5;
+  }
+  return Math.min(1, stamina / 100);
+}
+
+function tacticSkillStrength(player: Player, skill: Skill): number {
+  const loyalty = loyaltyValue(player);
+  const strength = (skillValue(player, skill) + loyalty) * formFactor(player);
+  const experience = skillValue(player, 'experience');
+  const experienceFactor = experience > 0 ? (Math.log10(experience) * 4) / 3 : 0;
+  return loyalty + strength + experienceFactor;
+}
+
+// Ports RatingPredictionModel.calcPressing at minute 90 with neutral weather.
+export function estimatePressingLevel(players: Player[], lineup: Record<string, string>, slots: string[]): number {
+  const playerById = new Map(players.map(player => [player.id, player]));
+  let defending = 0;
+  for (const slot of slots) {
+    if (slot === 'Portero') continue;
+    const player = playerById.get(lineup[slot]);
+    if (!player) continue;
+    let contribution = tacticSkillStrength(player, 'defending') * matchStaminaFactor(player, 90, true);
+    if (contribution > 0 && player.specialty === 3) contribution *= 2;
+    defending += contribution;
+  }
+  return 0.085 * defending + 0.075;
 }
