@@ -98,6 +98,16 @@ function isLineup(value: unknown): value is Record<string, string> {
     typeof slot === 'string' && typeof playerId === 'string'));
 }
 
+function sanitizeLineup(value: unknown, allowedSlots: Set<string>, allowedPlayerIds: Set<string>): Record<string, string> {
+  if (!isLineup(value)) return {};
+  const usedPlayerIds = new Set<string>();
+  return Object.fromEntries(Object.entries(value).filter(([slot, playerId]) => {
+    if (!allowedSlots.has(slot) || !allowedPlayerIds.has(playerId) || usedPlayerIds.has(playerId)) return false;
+    usedPlayerIds.add(playerId);
+    return true;
+  }));
+}
+
 export default function App() {
   const [activeTab, setActiveTab] = useState<Tab>('Alineación');
   const [formation, setFormation] = useState<Formation>('3-5-2');
@@ -132,7 +142,6 @@ export default function App() {
   const hasCompleteOpponentRatings = Object.keys(emptyOpponentRatings).every(key => typeof parsedOpponentRatings[key as RatingKey] === 'number');
   const hasAnyOpponentRatings = Object.values(parsedOpponentRatings).some(value => typeof value === 'number');
   const benchSuggestions = useMemo(() => team ? getBenchSuggestions(team.players, lineup, slots, tactic, hasCompleteOpponentRatings ? parsedOpponentRatings : null) : [], [team, lineup, slots, tactic, hasCompleteOpponentRatings, parsedOpponentRatings]);
-  const assignedElsewhere = new Set(Object.entries(lineup).filter(([slot]) => slot !== activeSlot).map(([, playerId]) => playerId));
 
   useEffect(() => {
     const storage = NativeModules.HOStorage;
@@ -163,8 +172,7 @@ export default function App() {
       if (savedTeam && isLineup(state.lineup)) {
         const playerIds = new Set(savedTeam.players.map(player => player.id));
         const slotsForFormation = new Set(formationRows(savedFormation).flat());
-        setLineup(Object.fromEntries(Object.entries(state.lineup).filter(([slot, playerId]) =>
-          slotsForFormation.has(slot) && playerIds.has(playerId))));
+        setLineup(sanitizeLineup(state.lineup, slotsForFormation, playerIds));
       }
     }).catch((error: unknown) => {
       console.warn('No se pudieron cargar los datos guardados de HO.', error);
@@ -229,6 +237,19 @@ export default function App() {
 
   const assignedName = (slot: string) => team?.players.find(player => player.id === lineup[slot])?.name;
   const assignedOpponentName = (slot: string) => opponentTeam?.players.find(player => player.id === opponentLineupResult?.assignments[slot])?.name;
+  const assignPlayerToSlot = (targetSlot: string, playerId: string) => {
+    setLineup(previous => {
+      const previousSlot = Object.entries(previous).find(([, assignedId]) => assignedId === playerId)?.[0];
+      const targetPlayerId = previous[targetSlot];
+      const next = {...previous};
+      if (previousSlot && previousSlot !== targetSlot) {
+        if (targetPlayerId) next[previousSlot] = targetPlayerId;
+        else delete next[previousSlot];
+      }
+      next[targetSlot] = playerId;
+      return next;
+    });
+  };
   const applyBestLineup = () => {
     if (!team) return;
     const result = optimizeLineup(team.players, slots, tactic, hasCompleteOpponentRatings ? parsedOpponentRatings : null);
@@ -350,9 +371,11 @@ export default function App() {
                   {team?.players
                     .map(player => ({player, rating: getPlayerSlotEstimate(player, activeSlot, slots)}))
                     .sort((a, b) => b.rating - a.rating)
-                    .map(({player, rating}) => (
-                      <Choice key={player.id} label={`${player.name} · ${rating.toFixed(1)}★ · DEF ${player.defending ?? '—'} · JUG ${player.playmaking ?? '—'} · ANO ${player.scoring ?? '—'}`} disabled={assignedElsewhere.has(player.id)} selected={lineup[activeSlot] === player.id} onPress={() => {setLineup(previous => ({...previous, [activeSlot]: player.id})); setActiveSlot(null);}} />
-                    ))}
+                    .map(({player, rating}) => {
+                      const assignedSlot = Object.entries(lineup).find(([, playerId]) => playerId === player.id)?.[0];
+                      const transfer = assignedSlot && assignedSlot !== activeSlot ? ` · intercambiar desde ${assignedSlot}` : '';
+                      return <Choice key={player.id} label={`${player.name} · ${rating.toFixed(1)}★ · DEF ${player.defending ?? '—'} · JUG ${player.playmaking ?? '—'} · ANO ${player.scoring ?? '—'}${transfer}`} selected={lineup[activeSlot] === player.id} onPress={() => {assignPlayerToSlot(activeSlot, player.id); setActiveSlot(null);}} />;
+                    })}
                   <Choice label="Dejar posición vacía" onPress={() => {setLineup(previous => {const next = {...previous}; delete next[activeSlot]; return next;}); setActiveSlot(null);}} />
                 </View>
               ) : null}
