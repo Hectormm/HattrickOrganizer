@@ -20,6 +20,10 @@ const skillMetrics: {key: keyof Player; label: string}[] = [
   {key: 'passing', label: 'Pases'},
   {key: 'winger', label: 'Lateral'},
   {key: 'scoring', label: 'Anotación'},
+  {key: 'form', label: 'Forma'},
+  {key: 'stamina', label: 'Resistencia'},
+  {key: 'experience', label: 'Experiencia'},
+  {key: 'loyalty', label: 'Fidelidad'},
 ];
 const lineupSectors = [
   {key: 'midfield', label: 'Mediocampo'},
@@ -498,7 +502,7 @@ export default function App() {
               <Text style={styles.caption}>La ventaja relativa compara ratings; no predice por sí sola el resultado ni las ocasiones.</Text>
             </View>
             <View style={styles.card}>
-              <Text style={styles.cardTitle}>Análisis de plantilla</Text>
+              <Text style={styles.cardTitle}>Medias de habilidades y estado</Text>
               <Text style={styles.muted}>{team ? `${team.name} · ${team.players.length} jugadores` : 'Importa un HRF desde Plantilla para analizar tu equipo.'}</Text>
               {team ? <>
                 {skillMetrics.map(metric => (
