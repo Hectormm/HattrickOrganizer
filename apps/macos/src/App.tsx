@@ -1,8 +1,8 @@
 import React, {useEffect, useMemo, useState} from 'react';
 import {NativeModules, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, View} from 'react-native';
 import {parseHrf, Player, Team} from './hrf';
-import {getPlayerPositionEstimate, PositionGroup, positionGroups} from './positionRatings';
-import {optimizeLineup} from './lineupOptimizer';
+import {getPlayerPositionEstimate, positionGroups} from './positionRatings';
+import {getPlayerSlotEstimate, optimizeLineup} from './lineupOptimizer';
 
 type Tab = 'Plantilla' | 'Alineación' | 'Team Analyzer';
 type Formation = '3-5-2' | '4-4-2' | '4-5-1' | '5-3-2' | '3-4-3';
@@ -57,15 +57,6 @@ function isTeam(value: unknown): value is Team {
 function isLineup(value: unknown): value is Record<string, string> {
   return Boolean(value && typeof value === 'object' && !Array.isArray(value) && Object.entries(value).every(([slot, playerId]) =>
     typeof slot === 'string' && typeof playerId === 'string'));
-}
-
-function positionGroupForSlot(slot: string): PositionGroup {
-  if (slot.startsWith('Portero')) return 'keeper';
-  if (slot.startsWith('Defensa central')) return 'centralDefender';
-  if (slot.startsWith('Lateral')) return 'back';
-  if (slot.startsWith('Extremo')) return 'winger';
-  if (slot.startsWith('Centrocampista central')) return 'innerMidfielder';
-  return 'forward';
 }
 
 export default function App() {
@@ -155,7 +146,6 @@ export default function App() {
   };
 
   const assignedName = (slot: string) => team?.players.find(player => player.id === lineup[slot])?.name;
-  const currentSlotGroup = activeSlot ? positionGroupForSlot(activeSlot) : null;
   const applyBestLineup = () => {
     if (!team) return;
     const result = optimizeLineup(team.players, slots);
@@ -235,7 +225,7 @@ export default function App() {
                 <View style={styles.picker}>
                   <Text style={styles.sectionTitle}>Elige jugador · {activeSlot}</Text>
                   {team?.players
-                    .map(player => ({player, rating: currentSlotGroup ? getPlayerPositionEstimate(player, currentSlotGroup) : 0}))
+                    .map(player => ({player, rating: getPlayerSlotEstimate(player, activeSlot, slots)}))
                     .sort((a, b) => b.rating - a.rating)
                     .map(({player, rating}) => (
                       <Choice key={player.id} label={`${player.name} · ${rating.toFixed(1)}★ · DEF ${player.defending ?? '—'} · JUG ${player.playmaking ?? '—'} · ANO ${player.scoring ?? '—'}`} disabled={assignedElsewhere.has(player.id)} selected={lineup[activeSlot] === player.id} onPress={() => {setLineup(previous => ({...previous, [activeSlot]: player.id})); setActiveSlot(null);}} />

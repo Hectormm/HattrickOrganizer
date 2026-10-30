@@ -24,6 +24,10 @@ function roleForSlot(slot: string, slots: string[]): number {
   return roles[index] ?? 112;
 }
 
+export function getPlayerSlotEstimate(player: Player, slot: string, slots: string[]): number {
+  return getPlayerRoleEstimate(player, roleForSlot(slot, slots));
+}
+
 /** Maximum-weight one-to-one assignment using the Hungarian algorithm. */
 export function optimizeLineup(players: Player[], slots: string[]): LineupResult {
   if (!players.length || !slots.length) return {assignments: {}, totalRating: 0};
@@ -31,7 +35,7 @@ export function optimizeLineup(players: Player[], slots: string[]): LineupResult
   const realColumns = players.length;
   const columns = Math.max(rows, realColumns);
   const weights = slots.map(slot => [
-    ...players.map(player => getPlayerRoleEstimate(player, roleForSlot(slot, slots))),
+    ...players.map(player => getPlayerSlotEstimate(player, slot, slots)),
     ...Array.from({length: columns - realColumns}, () => 0),
   ]);
 
