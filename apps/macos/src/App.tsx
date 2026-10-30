@@ -7,6 +7,8 @@ import {getBenchSuggestions, getPlayerSlotEstimate, optimizeLineup} from './line
 type Tab = 'Plantilla' | 'Alineación' | 'Team Analyzer';
 type Formation = '3-5-2' | '4-4-2' | '4-5-1' | '5-3-2' | '3-4-3';
 type Tactic = RatingTactic;
+type RatingKey = 'defenceLeft' | 'defenceCentral' | 'defenceRight' | 'midfield' | 'attackLeft' | 'attackCentral' | 'attackRight';
+type OpponentRatings = Record<RatingKey, string>;
 
 const tabs: Tab[] = ['Plantilla', 'Alineación', 'Team Analyzer'];
 const formations: Formation[] = ['3-5-2', '4-4-2', '4-5-1', '5-3-2', '3-4-3'];
@@ -28,6 +30,19 @@ const lineupSectors = [
   {key: 'attackCentral', label: 'Ataque central'},
   {key: 'attackRight', label: 'Ataque derecha'},
 ] as const;
+const emptyOpponentRatings: OpponentRatings = {
+  midfield: '', defenceLeft: '', defenceCentral: '', defenceRight: '',
+  attackLeft: '', attackCentral: '', attackRight: '',
+};
+const ratingMatchups: {key: RatingKey; opponentKey: RatingKey; label: string}[] = [
+  {key: 'midfield', opponentKey: 'midfield', label: 'Mediocampo'},
+  {key: 'defenceRight', opponentKey: 'attackLeft', label: 'Nuestra defensa derecha vs. ataque izquierdo rival'},
+  {key: 'defenceCentral', opponentKey: 'attackCentral', label: 'Nuestra defensa central vs. ataque central rival'},
+  {key: 'defenceLeft', opponentKey: 'attackRight', label: 'Nuestra defensa izquierda vs. ataque derecho rival'},
+  {key: 'attackRight', opponentKey: 'defenceLeft', label: 'Nuestro ataque derecho vs. defensa izquierda rival'},
+  {key: 'attackCentral', opponentKey: 'defenceCentral', label: 'Nuestro ataque central vs. defensa central rival'},
+  {key: 'attackLeft', opponentKey: 'defenceRight', label: 'Nuestro ataque izquierdo vs. defensa derecha rival'},
+];
 
 function formationRows(formation: Formation): string[][] {
   const [defenders, midfielders, forwards] = formation.split('-').map(Number);
@@ -56,6 +71,21 @@ function average(players: Player[], key: keyof Player): string {
   return values.length ? (values.reduce((sum, value) => sum + value, 0) / values.length).toFixed(1) : '—';
 }
 
+function parseRatingInput(value: string): number | null {
+  if (!value.trim()) return null;
+  const parsed = Number(value.replace(',', '.'));
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
+}
+
+function readOpponentRatings(value: unknown): OpponentRatings {
+  if (!value || typeof value !== 'object') return {...emptyOpponentRatings};
+  const saved = value as Record<string, unknown>;
+  return Object.fromEntries(Object.keys(emptyOpponentRatings).map(key => [
+    key,
+    typeof saved[key] === 'string' || typeof saved[key] === 'number' ? String(saved[key]) : '',
+  ])) as OpponentRatings;
+}
+
 function isTeam(value: unknown): value is Team {
   if (!value || typeof value !== 'object') return false;
   const candidate = value as Partial<Team>;
@@ -73,6 +103,8 @@ export default function App() {
   const [formation, setFormation] = useState<Formation>('3-5-2');
   const [tactic, setTactic] = useState<Tactic>('Normal');
   const [team, setTeam] = useState<Team | null>(null);
+  const [opponentName, setOpponentName] = useState('');
+  const [opponentRatings, setOpponentRatings] = useState<OpponentRatings>({...emptyOpponentRatings});
   const [hrfText, setHrfText] = useState('');
   const [importMessage, setImportMessage] = useState('');
   const [lineupMessage, setLineupMessage] = useState('');
@@ -96,12 +128,14 @@ export default function App() {
     let mounted = true;
     storage.loadState().then((saved: unknown) => {
       if (!mounted || !saved || typeof saved !== 'object') return;
-      const state = saved as {team?: unknown; formation?: unknown; tactic?: unknown; lineup?: unknown};
+      const state = saved as {team?: unknown; formation?: unknown; tactic?: unknown; lineup?: unknown; opponentName?: unknown; opponentRatings?: unknown};
       const savedTeam = isTeam(state.team) ? state.team : null;
       const savedFormation = formations.includes(state.formation as Formation) ? state.formation as Formation : '3-5-2';
       const savedTactic = tactics.includes(state.tactic as Tactic) ? state.tactic as Tactic : 'Normal';
 
       setTeam(savedTeam);
+      setOpponentName(typeof state.opponentName === 'string' ? state.opponentName : '');
+      setOpponentRatings(readOpponentRatings(state.opponentRatings));
       setFormation(savedFormation);
       setTactic(savedTactic);
       if (savedTeam && isLineup(state.lineup)) {
@@ -121,10 +155,10 @@ export default function App() {
 
   useEffect(() => {
     if (!storageReady || !NativeModules.HOStorage) return;
-    NativeModules.HOStorage.saveState({team, lineup, formation, tactic}).catch((error: unknown) => {
+    NativeModules.HOStorage.saveState({team, lineup, formation, tactic, opponentName, opponentRatings}).catch((error: unknown) => {
       console.warn('No se pudieron guardar los datos de HO.', error);
     });
-  }, [storageReady, team, lineup, formation, tactic]);
+  }, [storageReady, team, lineup, formation, tactic, opponentName, opponentRatings]);
 
   const chooseFormation = (next: Formation) => {
     setFormation(next);
@@ -291,32 +325,84 @@ export default function App() {
           </>
         ) : null}
         {activeTab === 'Team Analyzer' ? (
-          <View style={styles.card}>
-            <Text style={styles.cardTitle}>Medias de habilidades de la plantilla</Text>
-            <Text style={styles.muted}>{team ? `${team.name} · ${team.players.length} jugadores` : 'Importa un HRF desde Plantilla para analizar tu equipo.'}</Text>
-            {team ? <>
-              {skillMetrics.map(metric => (
-                <View key={metric.key} style={styles.metricRow}>
-                  <Text style={styles.metricName}>{metric.label}</Text>
-                  <Text style={styles.metricValue}>{average(team.players, metric.key)}</Text>
-                </View>
-              ))}
-              <Text style={styles.sectionTitle}>Mejores perfiles por posición</Text>
-              <Text style={styles.caption}>Estimación individual de HO con órdenes normales; no incluye clima ni ratings colectivos del partido.</Text>
-              {positionGroups.map(group => (
-                <View key={group.key} style={styles.rankingGroup}>
-                  <Text style={styles.metricName}>{group.label}</Text>
-                  {team.players
-                    .map(player => ({player, rating: getPlayerPositionEstimate(player, group.key)}))
-                    .sort((a, b) => b.rating - a.rating)
-                    .slice(0, 3)
-                    .map(({player, rating}, index) => (
-                      <Text key={player.id} style={styles.rankingPlayer}>{index + 1}. {player.name} · {rating.toFixed(1)}★</Text>
-                    ))}
-                </View>
-              ))}
-            </> : <Text style={styles.empty}>Todavía no hay datos cargados</Text>}
-          </View>
+          <>
+            <View style={styles.card}>
+              <Text style={styles.cardTitle}>Comparativa de ratings</Text>
+              <Text style={styles.muted}>{team ? `${team.name} · alineación ${formation} · ${tactic}` : 'Importa tu HRF y configura una alineación para calcular tus ratings.'}</Text>
+              <TextInput
+                accessibilityLabel="Nombre del rival"
+                onChangeText={setOpponentName}
+                placeholder="Nombre del rival"
+                placeholderTextColor="#91a1aa"
+                style={styles.opponentNameInput}
+                value={opponentName}
+              />
+              <Text style={styles.sectionTitle}>Ratings del rival</Text>
+              <Text style={styles.caption}>Introduce los ratings defensivos y ofensivos del Team Analyzer clásico para compararlos con tu alineación.</Text>
+              <View style={styles.opponentInputGrid}>
+                {lineupSectors.map(sector => (
+                  <View key={sector.key} style={styles.opponentInputRow}>
+                    <Text style={styles.opponentInputLabel}>{sector.label}</Text>
+                    <TextInput
+                      accessibilityLabel={`Rating rival ${sector.label}`}
+                      onChangeText={value => setOpponentRatings(previous => ({...previous, [sector.key]: value}))}
+                      placeholder="—"
+                      placeholderTextColor="#91a1aa"
+                      style={styles.opponentRatingInput}
+                      value={opponentRatings[sector.key]}
+                    />
+                  </View>
+                ))}
+              </View>
+              <Text style={styles.sectionTitle}>Ventaja por sector</Text>
+              {ratingMatchups.map(matchup => {
+                const own = Object.keys(lineup).length ? sectorRatings?.[matchup.key] : undefined;
+                const opponent = parseRatingInput(opponentRatings[matchup.opponentKey]);
+                const total = (own ?? 0) + (opponent ?? 0);
+                const advantage = own !== undefined && opponent !== null && total > 0 ? Math.round((own / total) * 100) : null;
+                const difference = own !== undefined && opponent !== null ? own - opponent : null;
+                const comparison = difference === null
+                  ? 'Añade los ratings del rival'
+                  : advantage === null
+                    ? `Δ ${difference >= 0 ? '+' : ''}${difference.toFixed(1)}`
+                    : `Δ ${difference >= 0 ? '+' : ''}${difference.toFixed(1)} · ${advantage}% de rating relativo`;
+                return (
+                  <View key={matchup.key} style={styles.matchupRow}>
+                    <Text style={styles.metricName}>{matchup.label}</Text>
+                    <Text style={styles.matchupValue}>{own === undefined ? 'Tú —' : `Tú ${own.toFixed(1)}`} · {opponent === null ? 'Rival —' : `Rival ${opponent.toFixed(1)}`}</Text>
+                    <Text style={styles.matchupAdvantage}>{comparison}</Text>
+                  </View>
+                );
+              })}
+              <Text style={styles.caption}>La ventaja relativa compara ratings; no predice por sí sola el resultado ni las ocasiones.</Text>
+            </View>
+            <View style={styles.card}>
+              <Text style={styles.cardTitle}>Análisis de plantilla</Text>
+              <Text style={styles.muted}>{team ? `${team.name} · ${team.players.length} jugadores` : 'Importa un HRF desde Plantilla para analizar tu equipo.'}</Text>
+              {team ? <>
+                {skillMetrics.map(metric => (
+                  <View key={metric.key} style={styles.metricRow}>
+                    <Text style={styles.metricName}>{metric.label}</Text>
+                    <Text style={styles.metricValue}>{average(team.players, metric.key)}</Text>
+                  </View>
+                ))}
+                <Text style={styles.sectionTitle}>Mejores perfiles por posición</Text>
+                <Text style={styles.caption}>Estimación individual de HO con órdenes normales; no incluye clima ni ratings colectivos del partido.</Text>
+                {positionGroups.map(group => (
+                  <View key={group.key} style={styles.rankingGroup}>
+                    <Text style={styles.metricName}>{group.label}</Text>
+                    {team.players
+                      .map(player => ({player, rating: getPlayerPositionEstimate(player, group.key)}))
+                      .sort((a, b) => b.rating - a.rating)
+                      .slice(0, 3)
+                      .map(({player, rating}, index) => (
+                        <Text key={player.id} style={styles.rankingPlayer}>{index + 1}. {player.name} · {rating.toFixed(1)}★</Text>
+                      ))}
+                  </View>
+                ))}
+              </> : <Text style={styles.empty}>Todavía no hay datos cargados</Text>}
+            </View>
+          </>
         ) : null}
       </ScrollView>
     </SafeAreaView>
@@ -357,6 +443,14 @@ const styles = StyleSheet.create({
   summaryValue: {marginTop: 3, fontSize: 15, color: '#19384b', fontWeight: '700'},
   empty: {marginTop: 22, padding: 20, textAlign: 'center', color: '#8295a0', backgroundColor: '#f5f8fa', borderRadius: 10, overflow: 'hidden'},
   hrfInput: {height: 140, marginTop: 16, marginBottom: 10, padding: 12, borderWidth: 1, borderColor: '#dbe4e9', borderRadius: 8, color: '#19384b', backgroundColor: '#fafcfd', textAlignVertical: 'top'},
+  opponentNameInput: {height: 38, marginTop: 14, paddingHorizontal: 10, borderWidth: 1, borderColor: '#dbe4e9', borderRadius: 8, color: '#19384b', backgroundColor: '#fafcfd'},
+  opponentInputGrid: {flexDirection: 'row', flexWrap: 'wrap', marginTop: 8},
+  opponentInputRow: {width: '50%', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 5, paddingRight: 12},
+  opponentInputLabel: {color: '#385465', fontSize: 13},
+  opponentRatingInput: {width: 78, height: 34, paddingHorizontal: 8, borderWidth: 1, borderColor: '#dbe4e9', borderRadius: 7, color: '#19384b', backgroundColor: '#fafcfd', textAlign: 'right'},
+  matchupRow: {paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#edf1f3'},
+  matchupValue: {marginTop: 5, color: '#19384b', fontSize: 14, fontWeight: '600'},
+  matchupAdvantage: {marginTop: 3, color: '#617785', fontSize: 12},
   importMessage: {marginTop: 6, color: '#267550', fontSize: 13},
   playerRow: {paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#edf1f3'},
   playerName: {color: '#19384b', fontSize: 14, fontWeight: '600'},
