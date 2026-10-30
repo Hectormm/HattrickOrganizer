@@ -209,6 +209,11 @@ export default function App() {
   const [weather, setWeather] = useState<MatchWeather>('Neutro');
   const [matchSettings, setMatchSettings] = useState<MatchSettings>({...defaultMatchSettings});
   const matchContext = useMemo(() => matchContextFromSettings(matchSettings), [matchSettings]);
+  const [opponentMatchSettings, setOpponentMatchSettings] = useState<MatchSettings>({...defaultMatchSettings});
+  const opponentMatchContext = useMemo<MatchContext>(() => ({
+    ...matchContextFromSettings(opponentMatchSettings),
+    venue: matchContext.venue === 'Fuera' ? 'En casa' : matchContext.venue === 'En casa' ? 'Fuera' : 'En casa',
+  }), [opponentMatchSettings, matchContext.venue]);
   const [team, setTeam] = useState<Team | null>(null);
   const [opponentTeam, setOpponentTeam] = useState<Team | null>(null);
   const [opponentFormation, setOpponentFormation] = useState<Formation>('3-5-2');
@@ -234,10 +239,10 @@ export default function App() {
   const slots = useMemo(() => rows.flat(), [rows]);
   const opponentRows = useMemo(() => formationRows(opponentFormation), [opponentFormation]);
   const opponentSlots = useMemo(() => opponentRows.flat(), [opponentRows]);
-  const opponentLineupResult = useMemo(() => opponentTeam ? optimizeLineup(opponentTeam.players, opponentSlots, opponentTactic, null, {}, weather) : null, [opponentTeam, opponentSlots, opponentTactic, weather]);
+  const opponentLineupResult = useMemo(() => opponentTeam ? optimizeLineup(opponentTeam.players, opponentSlots, opponentTactic, null, {}, weather, opponentMatchContext) : null, [opponentTeam, opponentSlots, opponentTactic, weather, opponentMatchContext]);
   const opponentSectorRatings = useMemo(() => opponentTeam && opponentLineupResult
-    ? estimateLineupSectors(opponentTeam.players, opponentLineupResult.assignments, opponentSlots, opponentTactic, opponentLineupResult.behaviors, weather)
-    : null, [opponentTeam, opponentLineupResult, opponentSlots, opponentTactic, weather]);
+    ? estimateLineupSectors(opponentTeam.players, opponentLineupResult.assignments, opponentSlots, opponentTactic, opponentLineupResult.behaviors, weather, opponentMatchContext)
+    : null, [opponentTeam, opponentLineupResult, opponentSlots, opponentTactic, weather, opponentMatchContext]);
   const sectorRatings = useMemo(() => team ? estimateLineupSectors(team.players, lineup, slots, tactic, behaviors, weather, matchContext) : null, [team, lineup, slots, tactic, behaviors, weather, matchContext]);
   const tacticLevel = useMemo(() => team ? estimateTacticLevel(team.players, lineup, slots, tactic, weather) : null, [team, lineup, slots, tactic, weather]);
   const parsedOpponentRatings = useMemo(() => Object.fromEntries(Object.keys(emptyOpponentRatings).map(key => {
@@ -286,13 +291,14 @@ export default function App() {
     let mounted = true;
     storage.loadState().then((saved: unknown) => {
       if (!mounted || !saved || typeof saved !== 'object') return;
-      const state = saved as {team?: unknown; formation?: unknown; tactic?: unknown; lineup?: unknown; opponentTeam?: unknown; opponentFormation?: unknown; opponentTactic?: unknown; opponentName?: unknown; opponentRatings?: unknown; behaviors?: unknown; weather?: unknown; matchSettings?: unknown; plannedSubstitutions?: unknown; substitutionMinute?: unknown; previewMinute?: unknown; previewGoalDifference?: unknown; previewRedCard?: unknown};
+      const state = saved as {team?: unknown; formation?: unknown; tactic?: unknown; lineup?: unknown; opponentTeam?: unknown; opponentFormation?: unknown; opponentTactic?: unknown; opponentName?: unknown; opponentRatings?: unknown; behaviors?: unknown; weather?: unknown; matchSettings?: unknown; opponentMatchSettings?: unknown; plannedSubstitutions?: unknown; substitutionMinute?: unknown; previewMinute?: unknown; previewGoalDifference?: unknown; previewRedCard?: unknown};
       const savedTeam = isTeam(state.team) ? state.team : null;
       const savedOpponentTeam = isTeam(state.opponentTeam) ? state.opponentTeam : null;
       const savedFormation = formations.includes(state.formation as Formation) ? state.formation as Formation : '3-5-2';
       const savedTactic = tactics.includes(state.tactic as Tactic) ? state.tactic as Tactic : 'Normal';
       const savedWeather = matchWeathers.includes(state.weather as MatchWeather) ? state.weather as MatchWeather : 'Neutro';
       const savedMatchSettings = readMatchSettings(state.matchSettings);
+      const savedOpponentMatchSettings = readMatchSettings(state.opponentMatchSettings);
       const savedOpponentFormation = formations.includes(state.opponentFormation as Formation) ? state.opponentFormation as Formation : '3-5-2';
       const savedOpponentTactic = tactics.includes(state.opponentTactic as Tactic) ? state.opponentTactic as Tactic : 'Normal';
 
@@ -306,6 +312,7 @@ export default function App() {
       setTactic(savedTactic);
       setWeather(savedWeather);
       setMatchSettings(savedMatchSettings);
+      setOpponentMatchSettings(savedOpponentMatchSettings);
       if (Array.isArray(state.plannedSubstitutions)) {
         const validIds = new Set(savedTeam?.players.map(player => player.id) ?? []);
         const validSlots = new Set(formationRows(savedFormation).flat());
@@ -339,10 +346,10 @@ export default function App() {
 
   useEffect(() => {
     if (!storageReady || !NativeModules.HOStorage) return;
-    NativeModules.HOStorage.saveState({team, lineup, behaviors, formation, tactic, weather, matchSettings, opponentTeam, opponentFormation, opponentTactic, opponentName, opponentRatings, plannedSubstitutions, substitutionMinute, previewMinute, previewGoalDifference, previewRedCard}).catch((error: unknown) => {
+    NativeModules.HOStorage.saveState({team, lineup, behaviors, formation, tactic, weather, matchSettings, opponentMatchSettings, opponentTeam, opponentFormation, opponentTactic, opponentName, opponentRatings, plannedSubstitutions, substitutionMinute, previewMinute, previewGoalDifference, previewRedCard}).catch((error: unknown) => {
       console.warn('No se pudieron guardar los datos de HO.', error);
     });
-  }, [storageReady, team, lineup, behaviors, formation, tactic, weather, matchSettings, opponentTeam, opponentFormation, opponentTactic, opponentName, opponentRatings, plannedSubstitutions, substitutionMinute, previewMinute, previewGoalDifference, previewRedCard]);
+  }, [storageReady, team, lineup, behaviors, formation, tactic, weather, matchSettings, opponentMatchSettings, opponentTeam, opponentFormation, opponentTactic, opponentName, opponentRatings, plannedSubstitutions, substitutionMinute, previewMinute, previewGoalDifference, previewRedCard]);
 
   const chooseFormation = (next: Formation) => {
     setFormation(next);
@@ -404,6 +411,13 @@ export default function App() {
       const imported = parseHrf(source);
       setOpponentTeam(imported.team);
       setOpponentName(imported.team.name);
+      setOpponentMatchSettings({
+        teamSpirit: String(imported.matchContext?.teamSpirit ?? defaultMatchContext.teamSpirit),
+        confidence: String(imported.matchContext?.confidence ?? defaultMatchContext.confidence),
+        coachModifier: String(imported.matchContext?.coachModifier ?? defaultMatchContext.coachModifier),
+        attitude: imported.attitude ?? defaultMatchSettings.attitude,
+        venue: defaultMatchSettings.venue,
+      });
       setOpponentRatings({...emptyOpponentRatings});
       setOpponentImportMessage(`${imported.team.players.length} jugadores importados · ${imported.team.name}`);
     } catch (error) {
@@ -641,7 +655,7 @@ export default function App() {
               {opponentTeam ? (
                 <View style={styles.opponentTeamCard}>
                   <Text style={styles.cardTitle}>{opponentTeam.name} · {opponentTeam.players.length} jugadores</Text>
-                  <Text style={styles.caption}>Se estima su mejor once y sus siete ratings con los datos de la plantilla.</Text>
+                  <Text style={styles.caption}>Contexto HRF: espíritu {opponentMatchContext.teamSpirit}, confianza {opponentMatchContext.confidence}, entrenador {opponentMatchContext.coachModifier >= 0 ? '+' : ''}{opponentMatchContext.coachModifier}, {opponentMatchContext.attitude.toLowerCase()}. Se estima su mejor once con el clima y la sede contraria a tu equipo.</Text>
                   <Text style={styles.metricName}>Formación del rival</Text>
                   <View style={styles.choices}>{formations.map(item => <Choice key={`opponent-${item}`} label={item} selected={opponentFormation === item} onPress={() => setOpponentFormation(item)} />)}</View>
                   <Text style={styles.metricName}>Táctica estimada del rival</Text>
