@@ -4,6 +4,10 @@ export type Player = {
   age: number | null;
   form: number | null;
   stamina: number | null;
+  experience: number | null;
+  loyalty: number | null;
+  homeGrown: boolean;
+  specialty: number | null;
   keeper: number | null;
   defending: number | null;
   playmaking: number | null;
@@ -57,6 +61,10 @@ export function parseHrf(source: string): Team {
       age: numberOrNull(values.ald),
       form: numberOrNull(values.for),
       stamina: numberOrNull(values.uth),
+      experience: numberOrNull(values.rut),
+      loyalty: numberOrNull(values.loy),
+      homeGrown: values.homegr === '1' || values.homegr?.toLowerCase() === 'true',
+      specialty: numberOrNull(values.speciality),
       keeper: numberOrNull(values.mlv),
       defending: numberOrNull(values.bac),
       playmaking: numberOrNull(values.spe),

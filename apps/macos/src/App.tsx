@@ -1,6 +1,7 @@
 import React, {useEffect, useMemo, useState} from 'react';
 import {NativeModules, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, View} from 'react-native';
 import {parseHrf, Player, Team} from './hrf';
+import {getPlayerPositionEstimate, PositionGroup, positionGroups} from './positionRatings';
 
 type Tab = 'Plantilla' | 'Alineación' | 'Team Analyzer';
 type Formation = '3-5-2' | '4-4-2' | '4-5-1' | '5-3-2' | '3-4-3';
@@ -47,6 +48,13 @@ function isTeam(value: unknown): value is Team {
 function isLineup(value: unknown): value is Record<string, string> {
   return Boolean(value && typeof value === 'object' && !Array.isArray(value) && Object.entries(value).every(([slot, playerId]) =>
     typeof slot === 'string' && typeof playerId === 'string'));
+}
+
+function positionGroupForSlot(slot: string): PositionGroup {
+  if (slot.startsWith('Portero')) return 'keeper';
+  if (slot.startsWith('Defensa')) return 'defender';
+  if (slot.startsWith('Centrocampista')) return 'midfielder';
+  return 'forward';
 }
 
 export default function App() {
@@ -135,6 +143,7 @@ export default function App() {
   };
 
   const assignedName = (slot: string) => team?.players.find(player => player.id === lineup[slot])?.name;
+  const currentSlotGroup = activeSlot ? positionGroupForSlot(activeSlot) : null;
 
   return (
     <SafeAreaView style={styles.root}>
@@ -204,9 +213,12 @@ export default function App() {
               {activeSlot ? (
                 <View style={styles.picker}>
                   <Text style={styles.sectionTitle}>Elige jugador · {activeSlot}</Text>
-                  {team?.players.map(player => (
-                    <Choice key={player.id} label={`${player.name} · DEF ${player.defending ?? '—'} · JUG ${player.playmaking ?? '—'} · ANO ${player.scoring ?? '—'}`} disabled={assignedElsewhere.has(player.id)} selected={lineup[activeSlot] === player.id} onPress={() => {setLineup(previous => ({...previous, [activeSlot]: player.id})); setActiveSlot(null);}} />
-                  ))}
+                  {team?.players
+                    .map(player => ({player, rating: currentSlotGroup ? getPlayerPositionEstimate(player, currentSlotGroup) : 0}))
+                    .sort((a, b) => b.rating - a.rating)
+                    .map(({player, rating}) => (
+                      <Choice key={player.id} label={`${player.name} · ${rating.toFixed(1)}★ · DEF ${player.defending ?? '—'} · JUG ${player.playmaking ?? '—'} · ANO ${player.scoring ?? '—'}`} disabled={assignedElsewhere.has(player.id)} selected={lineup[activeSlot] === player.id} onPress={() => {setLineup(previous => ({...previous, [activeSlot]: player.id})); setActiveSlot(null);}} />
+                    ))}
                   <Choice label="Dejar posición vacía" onPress={() => {setLineup(previous => {const next = {...previous}; delete next[activeSlot]; return next;}); setActiveSlot(null);}} />
                 </View>
               ) : null}
@@ -223,12 +235,28 @@ export default function App() {
           <View style={styles.card}>
             <Text style={styles.cardTitle}>Medias de habilidades de la plantilla</Text>
             <Text style={styles.muted}>{team ? `${team.name} · ${team.players.length} jugadores` : 'Importa un HRF desde Plantilla para analizar tu equipo.'}</Text>
-            {team ? skillMetrics.map(metric => (
-              <View key={metric.key} style={styles.metricRow}>
-                <Text style={styles.metricName}>{metric.label}</Text>
-                <Text style={styles.metricValue}>{average(team.players, metric.key)}</Text>
-              </View>
-            )) : <Text style={styles.empty}>Todavía no hay datos cargados</Text>}
+            {team ? <>
+              {skillMetrics.map(metric => (
+                <View key={metric.key} style={styles.metricRow}>
+                  <Text style={styles.metricName}>{metric.label}</Text>
+                  <Text style={styles.metricValue}>{average(team.players, metric.key)}</Text>
+                </View>
+              ))}
+              <Text style={styles.sectionTitle}>Mejores perfiles por posición</Text>
+              <Text style={styles.caption}>Estimación individual de HO con órdenes normales; no incluye clima ni ratings colectivos del partido.</Text>
+              {positionGroups.map(group => (
+                <View key={group.key} style={styles.rankingGroup}>
+                  <Text style={styles.metricName}>{group.label}</Text>
+                  {team.players
+                    .map(player => ({player, rating: getPlayerPositionEstimate(player, group.key)}))
+                    .sort((a, b) => b.rating - a.rating)
+                    .slice(0, 3)
+                    .map(({player, rating}, index) => (
+                      <Text key={player.id} style={styles.rankingPlayer}>{index + 1}. {player.name} · {rating.toFixed(1)}★</Text>
+                    ))}
+                </View>
+              ))}
+            </> : <Text style={styles.empty}>Todavía no hay datos cargados</Text>}
           </View>
         ) : null}
       </ScrollView>
@@ -274,4 +302,6 @@ const styles = StyleSheet.create({
   metricRow: {flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#edf1f3'},
   metricName: {color: '#385465', fontSize: 14},
   metricValue: {color: '#19384b', fontSize: 15, fontWeight: '700'},
+  rankingGroup: {paddingTop: 12, paddingBottom: 8, borderBottomWidth: 1, borderBottomColor: '#edf1f3'},
+  rankingPlayer: {marginTop: 6, color: '#617785', fontSize: 13},
 });
