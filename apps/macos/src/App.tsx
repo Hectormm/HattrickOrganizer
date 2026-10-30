@@ -1,5 +1,6 @@
 import React, {useEffect, useMemo, useState} from 'react';
-import {NativeModules, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, View} from 'react-native';
+import {SafeAreaView, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View} from 'react-native';
+import {loadAppState, pickHrfFile, saveAppState} from './platform';
 import {HrfSubstitution, parseHrf, Player, Team} from './hrf';
 import {estimateLineupSectors, estimateTacticLevel, getBehaviorsForSlot, getPlayerPositionEstimate, defaultMatchContext, LineupSectorRatings, MatchAttitude, MatchContext, MatchVenue, MatchWeather, matchAttitudes, matchVenues, matchWeathers, OpponentSectorRatings, PlayerBehavior, positionGroups, RatingTactic} from './positionRatings';
 import {getBenchSuggestions, getPlayerSlotEstimate, optimizeLineup} from './lineupOptimizer';
@@ -224,6 +225,7 @@ function readImportedOpponentLineup(value: unknown, players: Player[]): Imported
 }
 
 export default function App() {
+  const compactLayout = useWindowDimensions().width <= 720;
   const [activeTab, setActiveTab] = useState<Tab>('Alineación');
   const [formation, setFormation] = useState<Formation>('3-5-2');
   const [tactic, setTactic] = useState<Tactic>('Normal');
@@ -321,14 +323,8 @@ export default function App() {
   }, [team, hasCompleteOpponentRatings, activeTab, parsedOpponentRatings, weather, matchContext]);
 
   useEffect(() => {
-    const storage = NativeModules.HOStorage;
-    if (!storage) {
-      setStorageReady(true);
-      return;
-    }
-
     let mounted = true;
-    storage.loadState().then((saved: unknown) => {
+    loadAppState().then((saved: unknown) => {
       if (!mounted || !saved || typeof saved !== 'object') return;
       const state = saved as {team?: unknown; formation?: unknown; tactic?: unknown; lineup?: unknown; opponentTeam?: unknown; opponentImportedLineup?: unknown; opponentFormation?: unknown; opponentTactic?: unknown; opponentName?: unknown; opponentRatings?: unknown; behaviors?: unknown; weather?: unknown; matchSettings?: unknown; opponentMatchSettings?: unknown; plannedSubstitutions?: unknown; substitutionMinute?: unknown; previewMinute?: unknown; previewGoalDifference?: unknown; previewRedCard?: unknown};
       const savedTeam = isTeam(state.team) ? state.team : null;
@@ -385,8 +381,8 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (!storageReady || !NativeModules.HOStorage) return;
-    NativeModules.HOStorage.saveState({team, lineup, behaviors, formation, tactic, weather, matchSettings, opponentMatchSettings, opponentTeam, opponentImportedLineup, opponentFormation, opponentTactic, opponentName, opponentRatings, plannedSubstitutions, substitutionMinute, previewMinute, previewGoalDifference, previewRedCard}).catch((error: unknown) => {
+    if (!storageReady) return;
+    saveAppState({team, lineup, behaviors, formation, tactic, weather, matchSettings, opponentMatchSettings, opponentTeam, opponentImportedLineup, opponentFormation, opponentTactic, opponentName, opponentRatings, plannedSubstitutions, substitutionMinute, previewMinute, previewGoalDifference, previewRedCard}).catch((error: unknown) => {
       console.warn('No se pudieron guardar los datos de HO.', error);
     });
   }, [storageReady, team, lineup, behaviors, formation, tactic, weather, matchSettings, opponentMatchSettings, opponentTeam, opponentImportedLineup, opponentFormation, opponentTactic, opponentName, opponentRatings, plannedSubstitutions, substitutionMinute, previewMinute, previewGoalDifference, previewRedCard]);
@@ -434,7 +430,7 @@ export default function App() {
 
   const openHrfFile = async () => {
     try {
-      const source: string | null = await NativeModules.HODocumentPicker.pickHRF();
+      const source: string | null = await pickHrfFile();
       if (source) {
         setHrfText(source);
         importTeam(source);
@@ -446,7 +442,7 @@ export default function App() {
 
   const openOpponentHrfFile = async () => {
     try {
-      const source: string | null = await NativeModules.HODocumentPicker.pickHRF();
+      const source: string | null = await pickHrfFile();
       if (!source) return;
       const imported = parseHrf(source);
       setOpponentTeam(imported.team);
@@ -540,7 +536,7 @@ export default function App() {
         ))}
       </View>
       <ScrollView contentContainerStyle={styles.content}>
-        <Text style={styles.eyebrow}>HATTRICK ORGANIZER · PROTOTIPO NATIVO</Text>
+        <Text style={styles.eyebrow}>HATTRICK ORGANIZER · WEB Y MACOS</Text>
         <Text style={styles.title}>{activeTab}</Text>
         {activeTab === 'Plantilla' ? (
           <>
@@ -595,10 +591,10 @@ export default function App() {
                 {rows.map((row, index) => (
                   <View key={`${formation}-${index}`} style={styles.row}>
                     {row.map(slot => (
-                      <Text accessibilityRole="button" key={slot} onPress={() => {setActiveSlot(slot); setActiveTab('Alineación');}} style={[styles.position, activeSlot === slot && styles.positionActive]}>
+                      <Text accessibilityRole="button" key={slot} onPress={() => {setActiveSlot(slot); setActiveTab('Alineación');}} style={[styles.position, compactLayout && styles.positionCompact, activeSlot === slot && styles.positionActive]}>
                         <Text style={styles.positionDot}>●</Text>
-                        <Text style={styles.positionText}>{assignedName(slot) ?? slot}</Text>
-                        {behaviors[slot] && behaviors[slot] !== 'Normal' ? <Text style={styles.positionOrder}>{behaviors[slot]}</Text> : null}
+                        <Text style={[styles.positionText, compactLayout && styles.positionTextCompact]}>{assignedName(slot) ?? slot}</Text>
+                        {behaviors[slot] && behaviors[slot] !== 'Normal' ? <Text style={styles.positionOrder}>{`\n${behaviors[slot]}`}</Text> : null}
                       </Text>
                     ))}
                   </View>
@@ -728,7 +724,7 @@ export default function App() {
                   <View style={styles.pitch}>
                     {opponentRows.map((row, index) => (
                       <View key={`opponent-row-${index}`} style={styles.row}>
-                        {row.map(slot => <Text key={slot} style={styles.opponentPosition}>{assignedOpponentName(slot) ?? slot}</Text>)}
+                        {row.map(slot => <Text key={slot} style={[styles.opponentPosition, compactLayout && styles.opponentPositionCompact]}>{assignedOpponentName(slot) ?? slot}</Text>)}
                       </View>
                     ))}
                   </View>
@@ -871,14 +867,17 @@ const styles = StyleSheet.create({
   pitch: {paddingVertical: 12, paddingHorizontal: 10, borderRadius: 12, backgroundColor: '#e9f3ed', borderWidth: 1, borderColor: '#d6e8dc'},
   row: {flexDirection: 'row', justifyContent: 'center', alignItems: 'center', minHeight: 58},
   position: {minWidth: 100, alignItems: 'center', marginHorizontal: 5, padding: 5, borderRadius: 7, overflow: 'hidden', color: '#35584a'},
+  positionCompact: {minWidth: 70, maxWidth: 96, marginHorizontal: 1, padding: 3},
   positionActive: {backgroundColor: '#d4e8db'},
   positionDot: {color: '#267550', fontSize: 17},
   positionText: {marginTop: 3, color: '#35584a', fontSize: 11, textAlign: 'center'},
+  positionTextCompact: {fontSize: 9},
   positionOrder: {marginTop: 2, color: '#1c6b83', fontSize: 9, textAlign: 'center'},
   caption: {marginTop: 9, color: '#758995', fontSize: 12},
   sectorCard: {marginTop: 14, padding: 14, borderRadius: 10, backgroundColor: '#f6f8f9'},
   opponentTeamCard: {marginTop: 14, padding: 14, borderRadius: 10, backgroundColor: '#f6f8f9'},
   opponentPosition: {minWidth: 86, maxWidth: 150, alignItems: 'center', marginHorizontal: 4, padding: 5, borderRadius: 7, overflow: 'hidden', color: '#35584a', fontSize: 11, textAlign: 'center'},
+  opponentPositionCompact: {minWidth: 66, maxWidth: 96, marginHorizontal: 1, padding: 3, fontSize: 9},
   sectorGrid: {flexDirection: 'row', flexWrap: 'wrap', marginTop: 4},
   sectorRow: {width: '50%', flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 8, paddingRight: 16},
   picker: {marginTop: 12, padding: 14, borderRadius: 10, backgroundColor: '#f6f8f9'},

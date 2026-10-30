@@ -1,4 +1,5 @@
 node_modules/
+dist-web/
 macos/Pods/
 macos/build/
 macos/*.xcworkspace

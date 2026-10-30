@@ -1,4 +1,5 @@
 {
   "extends": "@react-native/typescript-config/tsconfig.json",
-  "compilerOptions": {"strict": true, "jsx": "react-jsx", "types": []}
+  "compilerOptions": {"strict": true, "jsx": "react-jsx", "types": [], "lib": ["ES2020", "DOM", "DOM.Iterable"]},
+  "include": ["**/*.ts", "**/*.tsx"]
 }
