@@ -173,6 +173,9 @@ export function optimizeLineup(players: Player[], slots: string[], tactic: Ratin
     if (bestAssignments !== assignments) {
       const replaced = new Set(Object.values(bestAssignments));
       bench.splice(0, bench.length, ...players.filter(player => !replaced.has(player.id)));
+      for (const slot of Object.keys(assignments)) {
+        if (!(slot in bestAssignments)) delete assignments[slot];
+      }
       Object.assign(assignments, bestAssignments);
       improved = true;
     }
