@@ -1,5 +1,5 @@
 import {Player} from './hrf';
-import {estimateLineupSectors, getPlayerRoleEstimate, getRoleIdForSlot} from './positionRatings';
+import {estimateLineupSectors, getPlayerRoleEstimate, getRoleIdForSlot, RatingTactic} from './positionRatings';
 
 type LineupResult = {assignments: Record<string, string>; totalRating: number};
 
@@ -8,7 +8,7 @@ export function getPlayerSlotEstimate(player: Player, slot: string, slots: strin
 }
 
 /** Maximum-weight one-to-one assignment using the Hungarian algorithm. */
-export function optimizeLineup(players: Player[], slots: string[]): LineupResult {
+export function optimizeLineup(players: Player[], slots: string[], tactic: RatingTactic = 'Normal'): LineupResult {
   if (!players.length || !slots.length) return {assignments: {}, totalRating: 0};
   const rows = slots.length;
   const realColumns = players.length;
@@ -75,7 +75,7 @@ export function optimizeLineup(players: Player[], slots: string[]): LineupResult
   const assignedIds = new Set(Object.values(assignments));
   const bench = players.filter(player => !assignedIds.has(player.id));
   const sectorScore = (candidate: Record<string, string>) =>
-    Object.values(estimateLineupSectors(players, candidate, slots)).reduce((sum, rating) => sum + rating, 0);
+    Object.values(estimateLineupSectors(players, candidate, slots, tactic)).reduce((sum, rating) => sum + rating, 0);
   let bestScore = sectorScore(assignments);
   let improved = true;
   while (improved) {

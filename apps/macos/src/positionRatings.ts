@@ -1,6 +1,7 @@
 import {Player} from './hrf';
 
 export type PositionGroup = 'keeper' | 'centralDefender' | 'back' | 'innerMidfielder' | 'winger' | 'forward';
+export type RatingTactic = 'Normal' | 'Ataque por el centro' | 'Ataque por las bandas' | 'Contraataques' | 'Presionar';
 export const positionGroups: {key: PositionGroup; label: string}[] = [
   {key: 'keeper', label: 'Portero'},
   {key: 'centralDefender', label: 'Defensa central'},
@@ -153,7 +154,7 @@ export function getRoleIdForSlot(slot: string, slots: string[]): number {
   return roles[index] ?? 112;
 }
 
-export function estimateLineupSectors(players: Player[], lineup: Record<string, string>, slots: string[]): LineupSectorRatings {
+export function estimateLineupSectors(players: Player[], lineup: Record<string, string>, slots: string[], tactic: RatingTactic = 'Normal'): LineupSectorRatings {
   const totals: LineupSectorRatings = {
     defenceLeft: 0, defenceCentral: 0, defenceRight: 0, midfield: 0,
     attackLeft: 0, attackCentral: 0, attackRight: 0,
@@ -187,7 +188,11 @@ export function estimateLineupSectors(players: Player[], lineup: Record<string, 
   }
 
   for (const sector of ratingSectors) {
-    const base = totals[sector.key] * sector.scale * (sector.key === 'midfield' ? 3 : 1);
+    let tacticFactor = 1;
+    if (sector.key === 'midfield' && tactic === 'Contraataques') tacticFactor = 0.93;
+    if ((sector.key === 'defenceLeft' || sector.key === 'defenceRight') && tactic === 'Ataque por el centro') tacticFactor = 0.85;
+    if (sector.key === 'defenceCentral' && tactic === 'Ataque por las bandas') tacticFactor = 0.85;
+    const base = totals[sector.key] * sector.scale * (sector.key === 'midfield' ? 3 : 1) * tacticFactor;
     totals[sector.key] = base > 0 ? base ** 1.2 / 4 + 1 : 0.75;
   }
   return totals;

@@ -1,12 +1,12 @@
 import React, {useEffect, useMemo, useState} from 'react';
 import {NativeModules, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, View} from 'react-native';
 import {parseHrf, Player, Team} from './hrf';
-import {estimateLineupSectors, getPlayerPositionEstimate, positionGroups} from './positionRatings';
+import {estimateLineupSectors, getPlayerPositionEstimate, positionGroups, RatingTactic} from './positionRatings';
 import {getPlayerSlotEstimate, optimizeLineup} from './lineupOptimizer';
 
 type Tab = 'Plantilla' | 'Alineación' | 'Team Analyzer';
 type Formation = '3-5-2' | '4-4-2' | '4-5-1' | '5-3-2' | '3-4-3';
-type Tactic = 'Normal' | 'Ataque por el centro' | 'Ataque por las bandas' | 'Contraataques' | 'Presionar';
+type Tactic = RatingTactic;
 
 const tabs: Tab[] = ['Plantilla', 'Alineación', 'Team Analyzer'];
 const formations: Formation[] = ['3-5-2', '4-4-2', '4-5-1', '5-3-2', '3-4-3'];
@@ -81,7 +81,7 @@ export default function App() {
   const [storageReady, setStorageReady] = useState(false);
   const rows = useMemo(() => formationRows(formation), [formation]);
   const slots = useMemo(() => rows.flat(), [rows]);
-  const sectorRatings = useMemo(() => team ? estimateLineupSectors(team.players, lineup, slots) : null, [team, lineup, slots]);
+  const sectorRatings = useMemo(() => team ? estimateLineupSectors(team.players, lineup, slots, tactic) : null, [team, lineup, slots, tactic]);
   const assignedElsewhere = new Set(Object.entries(lineup).filter(([slot]) => slot !== activeSlot).map(([, playerId]) => playerId));
 
   useEffect(() => {
@@ -158,7 +158,7 @@ export default function App() {
   const assignedName = (slot: string) => team?.players.find(player => player.id === lineup[slot])?.name;
   const applyBestLineup = () => {
     if (!team) return;
-    const result = optimizeLineup(team.players, slots);
+    const result = optimizeLineup(team.players, slots, tactic);
     setLineup(result.assignments);
     setActiveSlot(null);
     setLineupMessage(`${Object.keys(result.assignments).length}/${slots.length} puestos cubiertos · suma de sectores ${result.totalRating.toFixed(1)}★`);
@@ -234,7 +234,7 @@ export default function App() {
               {sectorRatings && Object.keys(lineup).length > 0 ? (
                 <View style={styles.sectorCard}>
                   <Text style={styles.sectionTitle}>Ratings estimados del once</Text>
-                  <Text style={styles.caption}>Órdenes normales; estimación sin clima ni factores colectivos del equipo.</Text>
+                  <Text style={styles.caption}>Incluye el modificador sectorial de la táctica cuando aplica. No incluye clima, entrenador, confianza ni espíritu; Presionar afecta las ocasiones, no estos siete ratings.</Text>
                   <View style={styles.sectorGrid}>
                     {lineupSectors.map(sector => (
                       <View key={sector.key} style={styles.sectorRow}>
