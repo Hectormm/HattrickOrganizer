@@ -3,11 +3,11 @@
 This React Native for macOS prototype currently implements three screens:
 
 - **Plantilla** opens an `.hrf` file with the native macOS file picker (or accepts pasted text) and reads the team name, first-team players, and player skills.
-- **Alineación** supports five formations, player assignment to positions, and match tactic selection. A player can only occupy one position at a time.
-- **Team Analyzer** calculates squad skill averages and ranks three player profiles for goalkeeper, defender, midfielder, and forward roles.
+- **Alineación** supports five formations, player assignment to exact Hattrick role groups, and match tactic selection. “Calcular mejor once” uses a maximum-weight one-to-one assignment across the eleven slots, so no player is selected twice and unfilled slots stay empty when the imported squad has fewer players.
+- **Team Analyzer** calculates squad skill averages and ranks three player profiles for goalkeeper, central defender, fullback, winger, inner midfielder, and forward roles.
 - The imported roster, draft lineup, formation, and tactic are saved in the app's macOS Application Support folder and restored at launch.
 
-The position estimates port the original `RatingPredictionModel` factors for normal player behaviour and include form, loyalty, experience, and stamina. They estimate one player's rating in a role; they do not calculate collective sector ratings, weather effects, non-normal player behaviour, or opponent-specific match odds. The rest of the Java domain model, match orders, substitutions, and CHPP sync have not been ported or connected yet. Tactical choices currently update the saved draft in the interface and do not write a Hattrick match order.
+The position estimates port the original `RatingPredictionModel` factors for normal player behaviour and include form, loyalty, experience, and stamina. The lineup optimizer maximizes the sum of these individual estimates for the selected formation; it is a useful draft, not a match result predictor. The estimates do not calculate collective sector ratings, weather effects, non-normal player behaviour, or opponent-specific match odds. The rest of the Java domain model, match orders, substitutions, and CHPP sync have not been ported or connected yet. Tactical choices currently update the saved draft in the interface and do not write a Hattrick match order.
 
 ## Local setup
 

@@ -1,10 +1,12 @@
 import {Player} from './hrf';
 
-export type PositionGroup = 'keeper' | 'defender' | 'midfielder' | 'forward';
+export type PositionGroup = 'keeper' | 'centralDefender' | 'back' | 'innerMidfielder' | 'winger' | 'forward';
 export const positionGroups: {key: PositionGroup; label: string}[] = [
   {key: 'keeper', label: 'Portero'},
-  {key: 'defender', label: 'Defensas'},
-  {key: 'midfielder', label: 'Centrocampistas'},
+  {key: 'centralDefender', label: 'Defensa central'},
+  {key: 'back', label: 'Lateral'},
+  {key: 'winger', label: 'Extremo'},
+  {key: 'innerMidfielder', label: 'Centrocampista central'},
   {key: 'forward', label: 'Delanteros'},
 ];
 
@@ -87,8 +89,10 @@ const positions: Position[] = [
 
 const roleIdsByGroup: Record<PositionGroup, number[]> = {
   keeper: [100],
-  defender: [101, 102, 103, 104, 105],
-  midfielder: [106, 107, 108, 109, 110],
+  centralDefender: [102, 103, 104],
+  back: [101, 105],
+  winger: [106, 110],
+  innerMidfielder: [107, 108, 109],
   forward: [111, 112, 113],
 };
 
@@ -130,4 +134,9 @@ function normalRating(player: Player, position: Position): number {
 export function getPlayerPositionEstimate(player: Player, group: PositionGroup): number {
   const roles = new Set(roleIdsByGroup[group]);
   return positions.filter(position => roles.has(position.role)).reduce((best, position) => Math.max(best, normalRating(player, position)), 0);
+}
+
+export function getPlayerRoleEstimate(player: Player, roleId: number): number {
+  const position = positions.find(candidate => candidate.role === roleId);
+  return position ? normalRating(player, position) : 0;
 }

@@ -2,6 +2,7 @@ import React, {useEffect, useMemo, useState} from 'react';
 import {NativeModules, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, View} from 'react-native';
 import {parseHrf, Player, Team} from './hrf';
 import {getPlayerPositionEstimate, PositionGroup, positionGroups} from './positionRatings';
+import {optimizeLineup} from './lineupOptimizer';
 
 type Tab = 'Plantilla' | 'Alineación' | 'Team Analyzer';
 type Formation = '3-5-2' | '4-4-2' | '4-5-1' | '5-3-2' | '3-4-3';
@@ -21,8 +22,16 @@ const skillMetrics: {key: keyof Player; label: string}[] = [
 
 function formationRows(formation: Formation): string[][] {
   const [defenders, midfielders, forwards] = formation.split('-').map(Number);
-  const line = (count: number, role: string) => Array.from({length: count}, (_, i) => `${role} ${i + 1}`);
-  return [line(forwards, 'Delantero'), line(midfielders, 'Centrocampista'), line(defenders, 'Defensa'), ['Portero']];
+  const forwardsLine = Array.from({length: forwards}, (_, i) => `Delantero ${i + 1}`);
+  const defendersLine = defenders === 3
+    ? Array.from({length: defenders}, (_, i) => `Defensa central ${i + 1}`)
+    : ['Lateral izquierdo', ...Array.from({length: defenders - 2}, (_, i) => `Defensa central ${i + 1}`), 'Lateral derecho'];
+  const midfieldLine = midfielders === 3
+    ? ['Extremo izquierdo', 'Centrocampista central 1', 'Extremo derecho']
+    : midfielders === 4
+      ? ['Extremo izquierdo', 'Centrocampista central 1', 'Centrocampista central 2', 'Extremo derecho']
+      : ['Extremo izquierdo', 'Centrocampista central 1', 'Centrocampista central 2', 'Centrocampista central 3', 'Extremo derecho'];
+  return [forwardsLine, midfieldLine, defendersLine, ['Portero']];
 }
 
 function Choice({label, selected, disabled, onPress}: {label: string; selected?: boolean; disabled?: boolean; onPress: () => void}) {
@@ -52,8 +61,10 @@ function isLineup(value: unknown): value is Record<string, string> {
 
 function positionGroupForSlot(slot: string): PositionGroup {
   if (slot.startsWith('Portero')) return 'keeper';
-  if (slot.startsWith('Defensa')) return 'defender';
-  if (slot.startsWith('Centrocampista')) return 'midfielder';
+  if (slot.startsWith('Defensa central')) return 'centralDefender';
+  if (slot.startsWith('Lateral')) return 'back';
+  if (slot.startsWith('Extremo')) return 'winger';
+  if (slot.startsWith('Centrocampista central')) return 'innerMidfielder';
   return 'forward';
 }
 
@@ -64,6 +75,7 @@ export default function App() {
   const [team, setTeam] = useState<Team | null>(null);
   const [hrfText, setHrfText] = useState('');
   const [importMessage, setImportMessage] = useState('');
+  const [lineupMessage, setLineupMessage] = useState('');
   const [lineup, setLineup] = useState<Record<string, string>>({});
   const [activeSlot, setActiveSlot] = useState<string | null>(null);
   const [storageReady, setStorageReady] = useState(false);
@@ -144,6 +156,13 @@ export default function App() {
 
   const assignedName = (slot: string) => team?.players.find(player => player.id === lineup[slot])?.name;
   const currentSlotGroup = activeSlot ? positionGroupForSlot(activeSlot) : null;
+  const applyBestLineup = () => {
+    if (!team) return;
+    const result = optimizeLineup(team.players, slots);
+    setLineup(result.assignments);
+    setActiveSlot(null);
+    setLineupMessage(`${Object.keys(result.assignments).length}/${slots.length} puestos cubiertos · ${result.totalRating.toFixed(1)}★ individuales`);
+  };
 
   return (
     <SafeAreaView style={styles.root}>
@@ -196,6 +215,8 @@ export default function App() {
               <Text style={styles.cardTitle}>Esquema de juego</Text>
               <Text style={styles.muted}>{team ? `${team.name} · toca una posición para asignar un jugador.` : 'Importa tu HRF desde Plantilla para asignar a tus jugadores.'}</Text>
               <View style={styles.choices}>{formations.map(item => <Choice key={item} label={item} selected={formation === item} onPress={() => chooseFormation(item)} />)}</View>
+              <Choice label="Calcular mejor once" disabled={!team} onPress={applyBestLineup} />
+              {lineupMessage ? <Text style={styles.importMessage}>{lineupMessage}</Text> : null}
               <Text style={styles.sectionTitle}>Vista del campo · {formation}</Text>
               <View style={styles.pitch}>
                 {rows.map((row, index) => (
