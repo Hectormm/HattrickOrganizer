@@ -251,3 +251,35 @@ export function estimatePressingLevel(players: Player[], lineup: Record<string, 
   }
   return 0.085 * defending + 0.075;
 }
+
+export function estimateTacticLevel(players: Player[], lineup: Record<string, string>, slots: string[], tactic: RatingTactic): number | null {
+  if (tactic === 'Normal') return null;
+  if (tactic === 'Presionar') return estimatePressingLevel(players, lineup, slots);
+
+  const playerById = new Map(players.map(player => [player.id, player]));
+  if (tactic === 'Ataque por el centro' || tactic === 'Ataque por las bandas') {
+    const passingTotal = slots
+      .filter(slot => slot !== 'Portero')
+      .map(slot => playerById.get(lineup[slot]))
+      .filter((player): player is Player => Boolean(player))
+      .reduce((sum, player) => sum + loyaltyValue(player) + skillValue(player, 'passing'), 0);
+    return passingTotal / 5 - 2;
+  }
+
+  const defenders = slots
+    .filter(slot => slot.startsWith('Lateral') || slot.startsWith('Defensa central'))
+    .map(slot => playerById.get(lineup[slot]))
+    .filter((player): player is Player => Boolean(player));
+  if (!defenders.length) return 0;
+  let weightedStrength = 0;
+  let formTotal = 0;
+  for (const player of defenders) {
+    const loyalty = loyaltyValue(player);
+    const passing = loyalty + skillValue(player, 'passing');
+    const defending = loyalty + skillValue(player, 'defending');
+    weightedStrength += 2 * passing + defending;
+    formTotal += player.form ?? 0;
+  }
+  weightedStrength *= formTotal / defenders.length;
+  return 0.017272 * weightedStrength + 1.042313;
+}

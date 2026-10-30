@@ -1,7 +1,7 @@
 import React, {useEffect, useMemo, useState} from 'react';
 import {NativeModules, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, View} from 'react-native';
 import {parseHrf, Player, Team} from './hrf';
-import {estimateLineupSectors, estimatePressingLevel, getPlayerPositionEstimate, positionGroups, RatingTactic} from './positionRatings';
+import {estimateLineupSectors, estimateTacticLevel, getPlayerPositionEstimate, positionGroups, RatingTactic} from './positionRatings';
 import {getPlayerSlotEstimate, optimizeLineup} from './lineupOptimizer';
 
 type Tab = 'Plantilla' | 'Alineación' | 'Team Analyzer';
@@ -82,7 +82,7 @@ export default function App() {
   const rows = useMemo(() => formationRows(formation), [formation]);
   const slots = useMemo(() => rows.flat(), [rows]);
   const sectorRatings = useMemo(() => team ? estimateLineupSectors(team.players, lineup, slots, tactic) : null, [team, lineup, slots, tactic]);
-  const pressingLevel = useMemo(() => team ? estimatePressingLevel(team.players, lineup, slots) : null, [team, lineup, slots]);
+  const tacticLevel = useMemo(() => team ? estimateTacticLevel(team.players, lineup, slots, tactic) : null, [team, lineup, slots, tactic]);
   const assignedElsewhere = new Set(Object.entries(lineup).filter(([slot]) => slot !== activeSlot).map(([, playerId]) => playerId));
 
   useEffect(() => {
@@ -246,11 +246,15 @@ export default function App() {
                   </View>
                 </View>
               ) : null}
-              {pressingLevel !== null && tactic === 'Presionar' && Object.keys(lineup).length > 0 ? (
+              {tacticLevel !== null && Object.keys(lineup).length > 0 ? (
                 <View style={styles.sectorCard}>
-                  <Text style={styles.sectionTitle}>Presionar · nivel de táctica estimado</Text>
-                  <Text style={styles.metricValue}>{pressingLevel.toFixed(2)}</Text>
-                  <Text style={styles.caption}>Estimación HO al minuto 90 con defensa, forma, experiencia, fidelidad, resistencia y especialidad Potente. Asume clima neutro.</Text>
+                  <Text style={styles.sectionTitle}>Nivel de táctica estimado · {tactic}</Text>
+                  <Text style={styles.metricValue}>{tacticLevel.toFixed(2)}</Text>
+                  <Text style={styles.caption}>{tactic === 'Contraataques'
+                    ? 'Cálculo HO con forma y habilidades de defensa y pases de los defensas.'
+                    : tactic === 'Presionar'
+                      ? 'Cálculo HO al minuto 90 con defensa, forma, experiencia, fidelidad, resistencia y especialidad Potente; asume clima neutro.'
+                      : 'Cálculo HO con el nivel de Pases de los diez jugadores de campo.'}</Text>
                 </View>
               ) : null}
               {activeSlot ? (
