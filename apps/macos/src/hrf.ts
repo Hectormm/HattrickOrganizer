@@ -61,6 +61,24 @@ const tacticsById: Record<string, HrfImport['tactic']> = {
   '4': 'Ataque por las bandas', '7': 'Jugar creativamente', '8': 'Tiros lejanos',
 };
 
+function normalizeCurrentLineup(values: Record<string, string>): Record<string, string> {
+  const fieldMappings: Record<string, string> = {
+    rightcentraldefender: 'insideback1', leftcentraldefender: 'insideback2', middlecentraldefender: 'insideback3',
+    rightinnermidfield: 'insidemid1', leftinnermidfield: 'insidemid2', middleinnermidfield: 'insidemid3',
+    rightforward: 'forward1', leftforward: 'forward2', centralforward: 'forward3',
+    order_rightback: 'behrightback', order_rightcentraldefender: 'behinsideback1', order_leftcentraldefender: 'behinsideback2',
+    order_middlecentraldefender: 'behinsideback3', order_leftback: 'behleftback', order_rightwinger: 'behrightwinger',
+    order_rightinnermidfield: 'behinsidemid1', order_leftinnermidfield: 'behinsidemid2',
+    order_centralinnermidfield: 'behinsidemid3', order_leftwinger: 'behleftwinger', order_rightforward: 'behforward1',
+    order_leftforward: 'behforward2', order_centralforward: 'behforward3',
+  };
+  const normalized = {...values};
+  for (const [source, target] of Object.entries(fieldMappings)) {
+    if (values[source] !== undefined) normalized[target] = values[source];
+  }
+  return normalized;
+}
+
 function parseLastLineup(values: Record<string, string>, players: Player[]): Pick<HrfImport, 'formation' | 'lineup' | 'behaviors' | 'tactic' | 'attitude' | 'substitutions'> {
   const availablePlayers = new Set(players.map(player => player.id));
   const selectedRoles = lineupRoleFields.flatMap(field => {
@@ -81,8 +99,12 @@ function parseLastLineup(values: Record<string, string>, players: Player[]): Pic
   } else {
     Object.assign(slots, {leftback: 'Lateral izquierdo', insideback1: 'Defensa central 1', insideback3: 'Defensa central 2', insideback2: 'Defensa central 3', rightback: 'Lateral derecho'});
   }
-  Object.assign(slots, {leftwinger: 'Extremo izquierdo', rightwinger: 'Extremo derecho'});
   const innerMidfields = selectedRoles.filter(field => field.group === 'midfield' && field.player !== 'rightwinger' && field.player !== 'leftwinger');
+  if (formation === '5-3-2' && innerMidfields.length === 3) {
+    Object.assign(slots, {insidemid1: 'Centrocampista central 1', insidemid3: 'Centrocampista central 2', insidemid2: 'Centrocampista central 3'});
+  } else {
+    Object.assign(slots, {leftwinger: 'Extremo izquierdo', rightwinger: 'Extremo derecho'});
+  }
   innerMidfields.forEach((field, index) => { slots[field.player] = `Centrocampista central ${index + 1}`; });
   const forwards = selectedRoles.filter(field => field.group === 'forward').sort((a, b) => a.role - b.role);
   forwards.forEach((field, index) => { slots[field.player] = `Delantero ${index + 1}`; });
@@ -181,10 +203,17 @@ export function parseHrf(source: string): HrfImport {
     }));
 
   if (!players.length) throw new Error('No encuentro jugadores del primer equipo en este HRF.');
+  const currentLineup = sections.find(section => section.type === 'lineup')?.values;
   const lastLineup = sections.find(section => section.type === 'lastlineup')?.values;
+  const preferredLineupValues = currentLineup ? normalizeCurrentLineup(currentLineup) : undefined;
+  const preferredLineup = preferredLineupValues ? parseLastLineup(preferredLineupValues, players) : {};
+  const restoredLineup = preferredLineup.formation && preferredLineup.lineup
+    ? preferredLineup
+    : lastLineup ? parseLastLineup(lastLineup, players) : {};
+  const restoredValues = preferredLineup.formation && preferredLineup.lineup ? preferredLineupValues : lastLineup;
   const spirit = numberOrNull(teamDetails.stamningvalue);
   const confidence = numberOrNull(teamDetails.sjalvfortroendevalue);
-  const coachModifier = numberOrNull(lastLineup?.styleofplay);
+  const coachModifier = numberOrNull(restoredValues?.styleofplay);
   return {
     team: {id: basics.teamid || null, name: basics.teamname || 'Equipo importado', players},
     matchContext: {
@@ -192,6 +221,6 @@ export function parseHrf(source: string): HrfImport {
       ...(confidence !== null && confidence >= 0 && confidence <= 9 ? {confidence} : {}),
       ...(coachModifier !== null && coachModifier >= -10 && coachModifier <= 10 ? {coachModifier} : {}),
     },
-    ...(lastLineup ? parseLastLineup(lastLineup, players) : {}),
+    ...restoredLineup,
   };
 }

@@ -104,7 +104,9 @@ function formationRows(formation: Formation): string[][] {
     ? Array.from({length: defenders}, (_, i) => `Defensa central ${i + 1}`)
     : ['Lateral izquierdo', ...Array.from({length: defenders - 2}, (_, i) => `Defensa central ${i + 1}`), 'Lateral derecho'];
   const midfieldLine = midfielders === 3
-    ? ['Extremo izquierdo', 'Centrocampista central 1', 'Extremo derecho']
+    ? formation === '5-3-2'
+      ? Array.from({length: midfielders}, (_, i) => `Centrocampista central ${i + 1}`)
+      : ['Extremo izquierdo', 'Centrocampista central 1', 'Extremo derecho']
     : midfielders === 4
       ? ['Extremo izquierdo', 'Centrocampista central 1', 'Centrocampista central 2', 'Extremo derecho']
       : ['Extremo izquierdo', 'Centrocampista central 1', 'Centrocampista central 2', 'Centrocampista central 3', 'Extremo derecho'];
@@ -386,7 +388,7 @@ export default function App() {
         setPlannedSubstitutions([]);
       }
       setActiveSlot(null);
-      setImportMessage(`${imported.team.players.length} jugadores importados · ${imported.team.name}${imported.lineup ? ` · última alineación ${imported.formation} cargada` : ''}${imported.substitutions?.length ? ` · ${imported.substitutions.length} cambios programados` : ''}`);
+      setImportMessage(`${imported.team.players.length} jugadores importados · ${imported.team.name}${imported.lineup ? ` · alineación ${imported.formation} cargada` : ''}${imported.substitutions?.length ? ` · ${imported.substitutions.length} cambios programados` : ''}`);
     } catch (error) {
       setImportMessage(error instanceof Error ? error.message : 'No se pudo leer el HRF.');
     }
