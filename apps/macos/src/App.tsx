@@ -1,8 +1,10 @@
 import React, {useEffect, useMemo, useState} from 'react';
 import {NativeModules, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, View} from 'react-native';
 import {HrfSubstitution, parseHrf, Player, Team} from './hrf';
-import {estimateLineupSectors, estimateTacticLevel, getBehaviorsForSlot, getPlayerPositionEstimate, defaultMatchContext, MatchAttitude, MatchContext, MatchVenue, MatchWeather, matchAttitudes, matchVenues, matchWeathers, OpponentSectorRatings, PlayerBehavior, positionGroups, RatingTactic} from './positionRatings';
+import {estimateLineupSectors, estimateTacticLevel, getBehaviorsForSlot, getPlayerPositionEstimate, defaultMatchContext, LineupSectorRatings, MatchAttitude, MatchContext, MatchVenue, MatchWeather, matchAttitudes, matchVenues, matchWeathers, OpponentSectorRatings, PlayerBehavior, positionGroups, RatingTactic} from './positionRatings';
 import {getBenchSuggestions, getPlayerSlotEstimate, optimizeLineup} from './lineupOptimizer';
+import {simulateMatches, tacticLevelForSimulation} from './matchSimulator';
+import type {MatchSimulationResult} from './matchSimulator';
 
 type Tab = 'Plantilla' | 'Alineación' | 'Team Analyzer';
 type Formation = '3-5-2' | '4-4-2' | '4-5-1' | '5-3-2' | '3-4-3' | '5-5-0';
@@ -253,6 +255,8 @@ export default function App() {
   const [previewMinute, setPreviewMinute] = useState('90');
   const [previewGoalDifference, setPreviewGoalDifference] = useState('0');
   const [previewRedCard, setPreviewRedCard] = useState(-1);
+  const [simulationSampleSize, setSimulationSampleSize] = useState('10000');
+  const [lastMatchSimulation, setLastMatchSimulation] = useState<{key: string; result: MatchSimulationResult} | null>(null);
   const [activeSlot, setActiveSlot] = useState<string | null>(null);
   const [storageReady, setStorageReady] = useState(false);
   const rows = useMemo(() => formationRows(formation), [formation]);
@@ -273,12 +277,19 @@ export default function App() {
     : null, [opponentTeam, opponentLineupResult, opponentSlots, opponentTactic, weather, opponentMatchContext]);
   const sectorRatings = useMemo(() => team ? estimateLineupSectors(team.players, lineup, slots, tactic, behaviors, weather, matchContext) : null, [team, lineup, slots, tactic, behaviors, weather, matchContext]);
   const tacticLevel = useMemo(() => team ? estimateTacticLevel(team.players, lineup, slots, tactic, weather) : null, [team, lineup, slots, tactic, weather]);
+  const opponentTacticLevel = useMemo(() => opponentTeam && opponentLineupResult
+    ? estimateTacticLevel(opponentTeam.players, opponentLineupResult.assignments, opponentSlots, opponentTactic, weather)
+    : null, [opponentTeam, opponentLineupResult, opponentSlots, opponentTactic, weather]);
   const parsedOpponentRatings = useMemo(() => Object.fromEntries(Object.keys(emptyOpponentRatings).map(key => {
     const manualRating = parseRatingInput(opponentRatings[key as RatingKey]);
     return [key, manualRating ?? opponentSectorRatings?.[key as RatingKey] ?? null];
   })) as OpponentSectorRatings, [opponentRatings, opponentSectorRatings]);
   const hasCompleteOpponentRatings = Object.keys(emptyOpponentRatings).every(key => typeof parsedOpponentRatings[key as RatingKey] === 'number');
   const hasAnyOpponentRatings = Object.values(parsedOpponentRatings).some(value => typeof value === 'number');
+  const simulationReady = Boolean(team && Object.keys(lineup).length === slots.length && sectorRatings && hasCompleteOpponentRatings);
+  const simulationKey = JSON.stringify([sectorRatings, parsedOpponentRatings, tactic, tacticLevel, opponentTactic, opponentTacticLevel, matchContext.venue]);
+  const displayedMatchSimulation = lastMatchSimulation?.key === simulationKey ? lastMatchSimulation.result : null;
+  const simulationMatchCount = Math.min(100000, Math.max(1000, Math.trunc(Number(simulationSampleSize.replace(',', '.')) || 10000)));
   const benchSuggestions = useMemo(() => team ? getBenchSuggestions(team.players, lineup, slots, tactic, hasCompleteOpponentRatings ? parsedOpponentRatings : null, behaviors, weather, matchContext) : [], [team, lineup, slots, tactic, hasCompleteOpponentRatings, parsedOpponentRatings, behaviors, weather, matchContext]);
   const projectedMinute = Math.max(0, Math.min(120, Number(previewMinute.replace(',', '.')) || 0));
   const parsedGoalDifference = Number(previewGoalDifference.replace(',', '.'));
@@ -499,6 +510,22 @@ export default function App() {
     const score = recommendation.result.matchupScore;
     const coverage = `${Object.keys(recommendation.result.assignments).length}/${recommendation.slots.length} puestos cubiertos`;
     setLineupMessage(`${recommendation.formation} · ${recommendation.tactic} · ${coverage} · índice de ventaja ${Math.round((score ?? 0) * 100)}% orientativo${opponentName.trim() ? ` contra ${opponentName.trim()}` : ''}`);
+  };
+
+  const runMatchSimulation = () => {
+    if (!simulationReady || !sectorRatings) return;
+    const opponentRatingsForMatch = Object.fromEntries(Object.entries(parsedOpponentRatings).map(([key, value]) => [key, value ?? 0])) as LineupSectorRatings;
+    const ownTeamIsHome = matchContext.venue === 'En casa';
+    const result = simulateMatches(
+      ownTeamIsHome ? sectorRatings : opponentRatingsForMatch,
+      ownTeamIsHome ? opponentRatingsForMatch : sectorRatings,
+      ownTeamIsHome ? tactic : opponentTactic,
+      tacticLevelForSimulation(ownTeamIsHome ? tacticLevel : opponentTacticLevel),
+      ownTeamIsHome ? opponentTactic : tactic,
+      tacticLevelForSimulation(ownTeamIsHome ? opponentTacticLevel : tacticLevel),
+      simulationMatchCount,
+    );
+    setLastMatchSimulation({key: simulationKey, result});
   };
 
   return (
@@ -764,6 +791,31 @@ export default function App() {
                 );
               })}
               <Text style={styles.caption}>La ventaja relativa compara ratings; no predice por sí sola el resultado ni las ocasiones.</Text>
+              <Text style={styles.sectionTitle}>Simulación de partido de HO</Text>
+              <Text style={styles.caption}>Port del simulador clásico de HO: reparte 10 acciones por partido y estima goles y ganador a partir de los ratings por sector. Es una simulación local, no un resultado oficial ni una predicción completa de Hattrick.</Text>
+              <View style={styles.contextInputRow}>
+                <Text style={styles.opponentInputLabel}>Partidos (1.000–100.000)</Text>
+                <TextInput accessibilityLabel="Número de partidos a simular" keyboardType="number-pad" onChangeText={setSimulationSampleSize} style={styles.contextInput} value={simulationSampleSize} />
+                <Choice label={`Simular ${simulationMatchCount.toLocaleString('es-ES')}`} disabled={!simulationReady} onPress={runMatchSimulation} />
+              </View>
+              {!simulationReady ? <Text style={styles.caption}>Completa los 11 puestos propios y los siete ratings del rival para simular.</Text> : null}
+              {displayedMatchSimulation ? (() => {
+                const ownTeamIsHome = matchContext.venue === 'En casa';
+                const ownWins = ownTeamIsHome ? displayedMatchSimulation.homeWins : displayedMatchSimulation.awayWins;
+                const opponentWins = ownTeamIsHome ? displayedMatchSimulation.awayWins : displayedMatchSimulation.homeWins;
+                const ownGoals = ownTeamIsHome ? displayedMatchSimulation.averageHomeGoals : displayedMatchSimulation.averageAwayGoals;
+                const opponentGoals = ownTeamIsHome ? displayedMatchSimulation.averageAwayGoals : displayedMatchSimulation.averageHomeGoals;
+                const ownName = team?.name ?? 'Tu equipo';
+                const rivalName = opponentName || opponentTeam?.name || 'Rival';
+                return (
+                  <View style={styles.summary}>
+                    <Text style={styles.summaryLabel}>{displayedMatchSimulation.matches.toLocaleString('es-ES')} simulaciones · {ownName} vs. {rivalName}</Text>
+                    <Text style={styles.summaryValue}>Gana {(ownWins / displayedMatchSimulation.matches * 100).toFixed(1)}% · Empata {(displayedMatchSimulation.draws / displayedMatchSimulation.matches * 100).toFixed(1)}% · Pierde {(opponentWins / displayedMatchSimulation.matches * 100).toFixed(1)}%</Text>
+                    <Text style={styles.summaryLabel}>Goles medios: {ownGoals.toFixed(2)}–{opponentGoals.toFixed(2)}</Text>
+                    <Text style={styles.caption}>Marcadores más frecuentes: {displayedMatchSimulation.commonScores.map(score => `${ownTeamIsHome ? score.home : score.away}–${ownTeamIsHome ? score.away : score.home} (${(score.count / displayedMatchSimulation.matches * 100).toFixed(1)}%)`).join(' · ')}</Text>
+                  </View>
+                );
+              })() : null}
             </View>
             <View style={styles.card}>
               <Text style={styles.cardTitle}>Medias de habilidades y estado</Text>
