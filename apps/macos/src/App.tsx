@@ -1,7 +1,7 @@
 import React, {useEffect, useMemo, useState} from 'react';
 import {NativeModules, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, View} from 'react-native';
 import {parseHrf, Player, Team} from './hrf';
-import {estimateLineupSectors, estimateTacticLevel, getPlayerPositionEstimate, positionGroups, RatingTactic} from './positionRatings';
+import {estimateLineupSectors, estimateTacticLevel, getPlayerPositionEstimate, OpponentSectorRatings, positionGroups, RatingTactic} from './positionRatings';
 import {getBenchSuggestions, getPlayerSlotEstimate, optimizeLineup} from './lineupOptimizer';
 
 type Tab = 'Plantilla' | 'Alineación' | 'Team Analyzer';
@@ -115,7 +115,10 @@ export default function App() {
   const slots = useMemo(() => rows.flat(), [rows]);
   const sectorRatings = useMemo(() => team ? estimateLineupSectors(team.players, lineup, slots, tactic) : null, [team, lineup, slots, tactic]);
   const tacticLevel = useMemo(() => team ? estimateTacticLevel(team.players, lineup, slots, tactic) : null, [team, lineup, slots, tactic]);
-  const benchSuggestions = useMemo(() => team ? getBenchSuggestions(team.players, lineup, slots, tactic) : [], [team, lineup, slots, tactic]);
+  const parsedOpponentRatings = useMemo(() => Object.fromEntries(Object.entries(opponentRatings).map(([key, value]) => [key, parseRatingInput(value)])) as OpponentSectorRatings, [opponentRatings]);
+  const hasCompleteOpponentRatings = Object.keys(emptyOpponentRatings).every(key => typeof parsedOpponentRatings[key as RatingKey] === 'number');
+  const hasAnyOpponentRatings = Object.values(parsedOpponentRatings).some(value => typeof value === 'number');
+  const benchSuggestions = useMemo(() => team ? getBenchSuggestions(team.players, lineup, slots, tactic, hasCompleteOpponentRatings ? parsedOpponentRatings : null) : [], [team, lineup, slots, tactic, hasCompleteOpponentRatings, parsedOpponentRatings]);
   const assignedElsewhere = new Set(Object.entries(lineup).filter(([slot]) => slot !== activeSlot).map(([, playerId]) => playerId));
 
   useEffect(() => {
@@ -194,10 +197,13 @@ export default function App() {
   const assignedName = (slot: string) => team?.players.find(player => player.id === lineup[slot])?.name;
   const applyBestLineup = () => {
     if (!team) return;
-    const result = optimizeLineup(team.players, slots, tactic);
+    const result = optimizeLineup(team.players, slots, tactic, hasCompleteOpponentRatings ? parsedOpponentRatings : null);
     setLineup(result.assignments);
     setActiveSlot(null);
-    setLineupMessage(`${Object.keys(result.assignments).length}/${slots.length} puestos cubiertos · suma de sectores ${result.totalRating.toFixed(1)}★`);
+    const coverage = `${Object.keys(result.assignments).length}/${slots.length} puestos cubiertos`;
+    setLineupMessage(result.matchupScore !== null
+      ? `${coverage} · índice de ventaja ${Math.round(result.matchupScore * 100)}% orientativo${opponentName.trim() ? ` contra ${opponentName.trim()}` : ''} · mediocampo ponderado ×3`
+      : `${coverage} · suma de sectores ${result.totalRating.toFixed(1)}★${hasAnyOpponentRatings ? ' · completa los siete ratings rivales para optimizar por cruces' : ''}`);
   };
 
   return (
@@ -295,12 +301,13 @@ export default function App() {
               {team && Object.keys(lineup).length > 0 && team.players.some(player => !Object.values(lineup).includes(player.id)) ? (
                 <View style={styles.sectorCard}>
                   <Text style={styles.sectionTitle}>Cambios que mejoran el once</Text>
-                  <Text style={styles.caption}>Mejoran la suma de los siete ratings estimados con la táctica seleccionada.</Text>
+                  <Text style={styles.caption}>{hasCompleteOpponentRatings ? 'Mejoran el índice de cruce contra los ratings del rival.' : 'Mejoran la suma de los siete ratings estimados con la táctica seleccionada.'}</Text>
                   {benchSuggestions.length ? benchSuggestions.map(suggestion => {
                     const outgoing = team.players.find(player => player.id === suggestion.outgoingPlayerId)?.name ?? 'Vacío';
                     const incoming = team.players.find(player => player.id === suggestion.incomingPlayerId)?.name ?? 'Jugador';
-                    return <Choice key={`${suggestion.slot}-${suggestion.incomingPlayerId}`} label={`${suggestion.slot}: ${outgoing} → ${incoming} · +${suggestion.gain.toFixed(2)}★`} onPress={() => setLineup(previous => ({...previous, [suggestion.slot]: suggestion.incomingPlayerId}))} />;
-                  }) : <Text style={styles.muted}>Ningún cambio de un suplente mejora la suma estimada.</Text>}
+                    const gain = suggestion.matchupBased ? `+${(suggestion.gain * 100).toFixed(1)} pp de ventaja` : `+${suggestion.gain.toFixed(2)}★`;
+                    return <Choice key={`${suggestion.slot}-${suggestion.incomingPlayerId}`} label={`${suggestion.slot}: ${outgoing} → ${incoming} · ${gain}`} onPress={() => setLineup(previous => ({...previous, [suggestion.slot]: suggestion.incomingPlayerId}))} />;
+                  }) : <Text style={styles.muted}>{hasCompleteOpponentRatings ? 'Ningún cambio del banquillo mejora el índice de cruce.' : 'Ningún cambio de un suplente mejora la suma estimada.'}</Text>}
                 </View>
               ) : null}
               {activeSlot ? (

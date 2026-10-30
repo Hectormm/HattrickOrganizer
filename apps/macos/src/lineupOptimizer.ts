@@ -1,26 +1,59 @@
 import {Player} from './hrf';
-import {estimateLineupSectors, getPlayerRoleEstimate, getRoleIdForSlot, RatingTactic} from './positionRatings';
+import {estimateLineupSectors, getPlayerRoleEstimate, getRoleIdForSlot, LineupSectorRatings, OpponentSectorRatings, RatingTactic} from './positionRatings';
 
-type LineupResult = {assignments: Record<string, string>; totalRating: number};
-export type BenchSuggestion = {slot: string; outgoingPlayerId: string | null; incomingPlayerId: string; gain: number};
+type LineupResult = {assignments: Record<string, string>; totalRating: number; matchupScore: number | null};
+export type BenchSuggestion = {slot: string; outgoingPlayerId: string | null; incomingPlayerId: string; gain: number; matchupBased: boolean};
+
+const sectorMatchups: {own: keyof LineupSectorRatings; opponent: keyof LineupSectorRatings; weight: number}[] = [
+  {own: 'midfield', opponent: 'midfield', weight: 3},
+  {own: 'defenceRight', opponent: 'attackLeft', weight: 1},
+  {own: 'defenceCentral', opponent: 'attackCentral', weight: 1},
+  {own: 'defenceLeft', opponent: 'attackRight', weight: 1},
+  {own: 'attackRight', opponent: 'defenceLeft', weight: 1},
+  {own: 'attackCentral', opponent: 'defenceCentral', weight: 1},
+  {own: 'attackLeft', opponent: 'defenceRight', weight: 1},
+];
+
+function hasCompleteOpponentRatings(opponentRatings?: OpponentSectorRatings | null): boolean {
+  return Boolean(opponentRatings) && sectorMatchups.every(matchup => {
+    const value = opponentRatings?.[matchup.opponent];
+    return typeof value === 'number' && Number.isFinite(value) && value >= 0;
+  });
+}
+
+function scoreLineup(ratings: LineupSectorRatings, opponentRatings?: OpponentSectorRatings | null): number {
+  if (!hasCompleteOpponentRatings(opponentRatings)) return Object.values(ratings).reduce((sum, rating) => sum + rating, 0);
+
+  let weightedShare = 0;
+  let totalWeight = 0;
+  for (const matchup of sectorMatchups) {
+    const own = ratings[matchup.own];
+    const opponent = opponentRatings![matchup.opponent] as number;
+    const total = own + opponent;
+    const share = total > 0 ? own / total : 0.5;
+    weightedShare += share * matchup.weight;
+    totalWeight += matchup.weight;
+  }
+  return weightedShare / totalWeight;
+}
 
 export function getPlayerSlotEstimate(player: Player, slot: string, slots: string[]): number {
   return getPlayerRoleEstimate(player, getRoleIdForSlot(slot, slots));
 }
 
-export function getBenchSuggestions(players: Player[], lineup: Record<string, string>, slots: string[], tactic: RatingTactic): BenchSuggestion[] {
+export function getBenchSuggestions(players: Player[], lineup: Record<string, string>, slots: string[], tactic: RatingTactic, opponentRatings?: OpponentSectorRatings | null): BenchSuggestion[] {
   const assignedIds = new Set(Object.values(lineup));
   const bench = players.filter(player => !assignedIds.has(player.id));
   if (!bench.length) return [];
 
   const sectorScore = (candidate: Record<string, string>) =>
-    Object.values(estimateLineupSectors(players, candidate, slots, tactic)).reduce((sum, rating) => sum + rating, 0);
+    scoreLineup(estimateLineupSectors(players, candidate, slots, tactic), opponentRatings);
   const currentScore = sectorScore(lineup);
   const candidates = slots.flatMap(slot => bench.flatMap(player => {
     const outgoingPlayerId = lineup[slot] ?? null;
     const candidate = {...lineup, [slot]: player.id};
     const gain = sectorScore(candidate) - currentScore;
-    return gain > 1e-6 ? [{slot, outgoingPlayerId, incomingPlayerId: player.id, gain}] : [];
+    return gain > 1e-6 ? [{slot, outgoingPlayerId, incomingPlayerId: player.id, gain, matchupBased: hasCompleteOpponentRatings(opponentRatings)}] : [];
   })).sort((a, b) => b.gain - a.gain);
 
   const usedSlots = new Set<string>();
@@ -34,8 +67,8 @@ export function getBenchSuggestions(players: Player[], lineup: Record<string, st
 }
 
 /** Maximum-weight one-to-one assignment using the Hungarian algorithm. */
-export function optimizeLineup(players: Player[], slots: string[], tactic: RatingTactic = 'Normal'): LineupResult {
-  if (!players.length || !slots.length) return {assignments: {}, totalRating: 0};
+export function optimizeLineup(players: Player[], slots: string[], tactic: RatingTactic = 'Normal', opponentRatings?: OpponentSectorRatings | null): LineupResult {
+  if (!players.length || !slots.length) return {assignments: {}, totalRating: 0, matchupScore: null};
   const rows = slots.length;
   const realColumns = players.length;
   const columns = Math.max(rows, realColumns);
@@ -89,19 +122,16 @@ export function optimizeLineup(players: Player[], slots: string[], tactic: Ratin
   }
 
   const assignments: Record<string, string> = {};
-  let totalRating = 0;
   for (let j = 1; j <= realColumns; j += 1) {
     const row = p[j] - 1;
     if (row < 0 || row >= rows) continue;
     assignments[slots[row]] = players[j - 1].id;
-    totalRating += weights[row][j - 1];
   }
 
   // Refine the individual-rating assignment against the seven team-sector ratings.
   const assignedIds = new Set(Object.values(assignments));
   const bench = players.filter(player => !assignedIds.has(player.id));
-  const sectorScore = (candidate: Record<string, string>) =>
-    Object.values(estimateLineupSectors(players, candidate, slots, tactic)).reduce((sum, rating) => sum + rating, 0);
+  const sectorScore = (candidate: Record<string, string>) => scoreLineup(estimateLineupSectors(players, candidate, slots, tactic), opponentRatings);
   let bestScore = sectorScore(assignments);
   let improved = true;
   while (improved) {
@@ -147,5 +177,8 @@ export function optimizeLineup(players: Player[], slots: string[], tactic: Ratin
       improved = true;
     }
   }
-  return {assignments, totalRating: bestScore};
+  const ratings = estimateLineupSectors(players, assignments, slots, tactic);
+  const totalRating = Object.values(ratings).reduce((sum, rating) => sum + rating, 0);
+  const matchupScore = scoreLineup(ratings, opponentRatings);
+  return {assignments, totalRating, matchupScore: hasCompleteOpponentRatings(opponentRatings) ? matchupScore : null};
 }

@@ -21,6 +21,7 @@ type Skill = 'keeper' | 'defending' | 'playmaking' | 'passing' | 'winger' | 'sco
 type Factor = [ContributionSet, Skill, Sector, SideRestriction, number];
 type Position = {role: number; sector: Sector; side: Side};
 export type LineupSectorRatings = Record<RatingSector, number>;
+export type OpponentSectorRatings = Partial<Record<keyof LineupSectorRatings, number | null>>;
 
 // Normal-behaviour factors ported from RatingPredictionModel.initRatingContributionParameterMap.
 const factors: Factor[] = [
