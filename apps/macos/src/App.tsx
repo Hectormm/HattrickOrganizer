@@ -30,6 +30,38 @@ const redCardConditions = [
   {id: 22, label: 'Expulsan a un centrocampista rival'}, {id: 23, label: 'Expulsan a un delantero rival'}, {id: 24, label: 'Expulsan a un lateral rival'},
   {id: 25, label: 'Expulsan a un extremo rival'},
 ];
+const redCardEvents = [
+  {id: -1, label: 'No hay expulsiones'}, ...redCardConditions.slice(1),
+];
+
+function goalConditionMatches(condition: number, goalDifference: number): boolean {
+  switch (condition) {
+    case -1: return true;
+    case 0: return goalDifference === 0;
+    case 1: return goalDifference > 0;
+    case 2: return goalDifference < 0;
+    case 3: return goalDifference >= 2;
+    case 4: return goalDifference <= -2;
+    case 5: return goalDifference >= 0;
+    case 6: return goalDifference <= 0;
+    case 7: return goalDifference >= 3;
+    case 8: return goalDifference <= -3;
+    case 9: return goalDifference !== 0;
+    case 10: return goalDifference <= 1;
+    case 11: return goalDifference >= -1;
+    case 12: return goalDifference <= 2;
+    case 13: return goalDifference >= -2;
+    default: return false;
+  }
+}
+
+function redCardConditionMatches(condition: number, event: number): boolean {
+  if (condition === -1) return true;
+  if (event === -1) return false;
+  if (condition === 1) return event === 1 || (event >= 11 && event <= 15);
+  if (condition === 2) return event === 2 || (event >= 21 && event <= 25);
+  return condition === event;
+}
 const skillMetrics: {key: keyof Player; label: string}[] = [
   {key: 'keeper', label: 'Portería'},
   {key: 'defending', label: 'Defensa'},
@@ -194,6 +226,8 @@ export default function App() {
   const [substitutionStanding, setSubstitutionStanding] = useState(-1);
   const [substitutionCard, setSubstitutionCard] = useState(-1);
   const [previewMinute, setPreviewMinute] = useState('90');
+  const [previewGoalDifference, setPreviewGoalDifference] = useState('0');
+  const [previewRedCard, setPreviewRedCard] = useState(-1);
   const [activeSlot, setActiveSlot] = useState<string | null>(null);
   const [storageReady, setStorageReady] = useState(false);
   const rows = useMemo(() => formationRows(formation), [formation]);
@@ -214,16 +248,17 @@ export default function App() {
   const hasAnyOpponentRatings = Object.values(parsedOpponentRatings).some(value => typeof value === 'number');
   const benchSuggestions = useMemo(() => team ? getBenchSuggestions(team.players, lineup, slots, tactic, hasCompleteOpponentRatings ? parsedOpponentRatings : null, behaviors, weather, matchContext) : [], [team, lineup, slots, tactic, hasCompleteOpponentRatings, parsedOpponentRatings, behaviors, weather, matchContext]);
   const projectedMinute = Math.max(0, Math.min(120, Number(previewMinute.replace(',', '.')) || 0));
+  const parsedGoalDifference = Number(previewGoalDifference.replace(',', '.'));
+  const previewDiff = Number.isFinite(parsedGoalDifference) ? Math.max(-20, Math.min(20, Math.trunc(parsedGoalDifference))) : 0;
   const projectedLineup = useMemo(() => {
     const projection = {...lineup};
     for (const substitution of [...plannedSubstitutions].sort((a, b) => a.minute - b.minute)) {
-      if (substitution.standing !== -1 || substitution.card !== -1) continue;
-      if (substitution.minute > projectedMinute || projection[substitution.slot] !== substitution.outgoingPlayerId) continue;
+      if (substitution.minute > projectedMinute || !goalConditionMatches(substitution.standing, previewDiff) || !redCardConditionMatches(substitution.card, previewRedCard) || projection[substitution.slot] !== substitution.outgoingPlayerId) continue;
       if (Object.values(projection).includes(substitution.incomingPlayerId)) continue;
       projection[substitution.slot] = substitution.incomingPlayerId;
     }
     return projection;
-  }, [lineup, plannedSubstitutions, projectedMinute]);
+  }, [lineup, plannedSubstitutions, projectedMinute, previewDiff, previewRedCard]);
   const projectedRatings = useMemo(() => team && plannedSubstitutions.length
     ? estimateLineupSectors(team.players, projectedLineup, slots, tactic, behaviors, weather, matchContext)
     : null, [team, plannedSubstitutions.length, projectedLineup, slots, tactic, behaviors, weather, matchContext]);
@@ -251,7 +286,7 @@ export default function App() {
     let mounted = true;
     storage.loadState().then((saved: unknown) => {
       if (!mounted || !saved || typeof saved !== 'object') return;
-      const state = saved as {team?: unknown; formation?: unknown; tactic?: unknown; lineup?: unknown; opponentTeam?: unknown; opponentFormation?: unknown; opponentTactic?: unknown; opponentName?: unknown; opponentRatings?: unknown; behaviors?: unknown; weather?: unknown; matchSettings?: unknown; plannedSubstitutions?: unknown; substitutionMinute?: unknown; previewMinute?: unknown};
+      const state = saved as {team?: unknown; formation?: unknown; tactic?: unknown; lineup?: unknown; opponentTeam?: unknown; opponentFormation?: unknown; opponentTactic?: unknown; opponentName?: unknown; opponentRatings?: unknown; behaviors?: unknown; weather?: unknown; matchSettings?: unknown; plannedSubstitutions?: unknown; substitutionMinute?: unknown; previewMinute?: unknown; previewGoalDifference?: unknown; previewRedCard?: unknown};
       const savedTeam = isTeam(state.team) ? state.team : null;
       const savedOpponentTeam = isTeam(state.opponentTeam) ? state.opponentTeam : null;
       const savedFormation = formations.includes(state.formation as Formation) ? state.formation as Formation : '3-5-2';
@@ -285,6 +320,8 @@ export default function App() {
       }
       if (typeof state.substitutionMinute === 'string') setSubstitutionMinute(state.substitutionMinute);
       if (typeof state.previewMinute === 'string') setPreviewMinute(state.previewMinute);
+      if (typeof state.previewGoalDifference === 'string') setPreviewGoalDifference(state.previewGoalDifference);
+      if (redCardEvents.some(event => event.id === state.previewRedCard)) setPreviewRedCard(state.previewRedCard as number);
       setBehaviors(sanitizeBehaviors(state.behaviors, new Set(formationRows(savedFormation).flat())));
       if (savedTeam && isLineup(state.lineup)) {
         const playerIds = new Set(savedTeam.players.map(player => player.id));
@@ -302,10 +339,10 @@ export default function App() {
 
   useEffect(() => {
     if (!storageReady || !NativeModules.HOStorage) return;
-    NativeModules.HOStorage.saveState({team, lineup, behaviors, formation, tactic, weather, matchSettings, opponentTeam, opponentFormation, opponentTactic, opponentName, opponentRatings, plannedSubstitutions, substitutionMinute, previewMinute}).catch((error: unknown) => {
+    NativeModules.HOStorage.saveState({team, lineup, behaviors, formation, tactic, weather, matchSettings, opponentTeam, opponentFormation, opponentTactic, opponentName, opponentRatings, plannedSubstitutions, substitutionMinute, previewMinute, previewGoalDifference, previewRedCard}).catch((error: unknown) => {
       console.warn('No se pudieron guardar los datos de HO.', error);
     });
-  }, [storageReady, team, lineup, behaviors, formation, tactic, weather, matchSettings, opponentTeam, opponentFormation, opponentTactic, opponentName, opponentRatings, plannedSubstitutions, substitutionMinute, previewMinute]);
+  }, [storageReady, team, lineup, behaviors, formation, tactic, weather, matchSettings, opponentTeam, opponentFormation, opponentTactic, opponentName, opponentRatings, plannedSubstitutions, substitutionMinute, previewMinute, previewGoalDifference, previewRedCard]);
 
   const chooseFormation = (next: Formation) => {
     setFormation(next);
@@ -534,6 +571,9 @@ export default function App() {
                   {plannedSubstitutions.length ? <>
                     <Text style={styles.sectionTitle}>Cambios guardados · vista al minuto</Text>
                     <View style={styles.contextInputRow}><Text style={styles.opponentInputLabel}>Minuto para calcular los ratings (0–120)</Text><TextInput accessibilityLabel="Minuto de la vista previa" keyboardType="number-pad" onChangeText={setPreviewMinute} style={styles.contextInput} value={previewMinute} /></View>
+                    <View style={styles.contextInputRow}><Text style={styles.opponentInputLabel}>Diferencia de goles (tú − rival)</Text><TextInput accessibilityLabel="Diferencia de goles para la vista previa" keyboardType="numbers-and-punctuation" onChangeText={setPreviewGoalDifference} style={styles.contextInput} value={previewGoalDifference} /></View>
+                    <Text style={styles.sectionTitle}>Expulsión del escenario</Text>
+                    <View style={styles.choices}>{redCardEvents.map(event => <Choice key={`preview-card-${event.id}`} label={event.label} selected={previewRedCard === event.id} onPress={() => setPreviewRedCard(event.id)} />)}</View>
                     {plannedSubstitutions.map((item, index) => {
                       const from = team.players.find(player => player.id === item.outgoingPlayerId)?.name ?? 'Jugador';
                       const to = team.players.find(player => player.id === item.incomingPlayerId)?.name ?? 'Jugador';
@@ -541,8 +581,8 @@ export default function App() {
                       const card = redCardConditions.find(condition => condition.id === item.card)?.label ?? 'Expulsión';
                       return <Choice key={`${item.slot}-${item.incomingPlayerId}`} label={`${item.minute}' · ${item.slot}: ${from} → ${to} · ${standing} · ${card} · quitar`} onPress={() => setPlannedSubstitutions(previous => previous.filter((_, itemIndex) => itemIndex !== index))} />;
                     })}
-                    {plannedSubstitutions.some(item => item.standing !== -1 || item.card !== -1) ? <Text style={styles.caption}>La vista de ratings aplica solo cambios sin condiciones; no predice el marcador ni las expulsiones.</Text> : null}
-                    {projectedRatings ? <View style={styles.sectorGrid}>{lineupSectors.map(sector => <View key={`projected-${sector.key}`} style={styles.sectorRow}><Text style={styles.metricName}>{sector.label}</Text><Text style={styles.metricValue}>{projectedRatings[sector.key].toFixed(1)}★</Text></View>)}</View> : null}
+                    <Text style={styles.caption}>Se aplican los criterios de minuto, marcador y expulsión seleccionados para esta simulación.</Text>
+                    {projectedRatings ? <><Text style={styles.sectionTitle}>Ratings estimados al minuto {projectedMinute}' · {previewDiff > 0 ? `ganas por ${previewDiff}` : previewDiff < 0 ? `pierdes por ${Math.abs(previewDiff)}` : 'empate'}</Text><View style={styles.sectorGrid}>{lineupSectors.map(sector => <View key={`projected-${sector.key}`} style={styles.sectorRow}><Text style={styles.metricName}>{sector.label}</Text><Text style={styles.metricValue}>{projectedRatings[sector.key].toFixed(1)}★</Text></View>)}</View></> : null}
                   </> : null}
                 </View>
               ) : null}
