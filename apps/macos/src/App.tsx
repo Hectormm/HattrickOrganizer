@@ -142,6 +142,15 @@ export default function App() {
   const hasCompleteOpponentRatings = Object.keys(emptyOpponentRatings).every(key => typeof parsedOpponentRatings[key as RatingKey] === 'number');
   const hasAnyOpponentRatings = Object.values(parsedOpponentRatings).some(value => typeof value === 'number');
   const benchSuggestions = useMemo(() => team ? getBenchSuggestions(team.players, lineup, slots, tactic, hasCompleteOpponentRatings ? parsedOpponentRatings : null) : [], [team, lineup, slots, tactic, hasCompleteOpponentRatings, parsedOpponentRatings]);
+  const formationRecommendations = useMemo(() => {
+    if (!team || !hasCompleteOpponentRatings || activeTab !== 'Alineación') return [];
+    return formations.map(candidateFormation => {
+      const candidateSlots = formationRows(candidateFormation).flat();
+      const result = optimizeLineup(team.players, candidateSlots, tactic, parsedOpponentRatings);
+      return {formation: candidateFormation, slots: candidateSlots, result};
+    }).filter(recommendation => recommendation.result.matchupScore !== null)
+      .sort((a, b) => (b.result.matchupScore ?? 0) - (a.result.matchupScore ?? 0));
+  }, [team, hasCompleteOpponentRatings, activeTab, tactic, parsedOpponentRatings]);
 
   useEffect(() => {
     const storage = NativeModules.HOStorage;
@@ -260,6 +269,14 @@ export default function App() {
       ? `${coverage} · índice de ventaja ${Math.round(result.matchupScore * 100)}% orientativo${opponentName.trim() ? ` contra ${opponentName.trim()}` : ''} · mediocampo ponderado ×3`
       : `${coverage} · suma de sectores ${result.totalRating.toFixed(1)}★${hasAnyOpponentRatings ? ' · completa los siete ratings rivales para optimizar por cruces' : ''}`);
   };
+  const applyFormationRecommendation = (recommendation: (typeof formationRecommendations)[number]) => {
+    setFormation(recommendation.formation);
+    setLineup(recommendation.result.assignments);
+    setActiveSlot(null);
+    const score = recommendation.result.matchupScore;
+    const coverage = `${Object.keys(recommendation.result.assignments).length}/${recommendation.slots.length} puestos cubiertos`;
+    setLineupMessage(`${recommendation.formation} · ${coverage} · índice de ventaja ${Math.round((score ?? 0) * 100)}% orientativo${opponentName.trim() ? ` contra ${opponentName.trim()}` : ''}`);
+  };
 
   return (
     <SafeAreaView style={styles.root}>
@@ -311,6 +328,15 @@ export default function App() {
             <View style={styles.card}>
               <Text style={styles.cardTitle}>Esquema de juego</Text>
               <Text style={styles.muted}>{team ? `${team.name} · toca una posición para asignar un jugador.` : 'Importa tu HRF desde Plantilla para asignar a tus jugadores.'}</Text>
+              {formationRecommendations.length ? (
+                <View style={styles.sectorCard}>
+                  <Text style={styles.sectionTitle}>Mejores formaciones frente al rival</Text>
+                  <Text style={styles.caption}>Se optimiza el once para cada esquema con la táctica actual.</Text>
+                  {formationRecommendations.slice(0, 3).map(recommendation => (
+                    <Choice key={`recommend-${recommendation.formation}`} label={`${recommendation.formation} · ${Math.round((recommendation.result.matchupScore ?? 0) * 100)}% de ventaja orientativa · aplicar once`} selected={formation === recommendation.formation} onPress={() => applyFormationRecommendation(recommendation)} />
+                  ))}
+                </View>
+              ) : null}
               <View style={styles.choices}>{formations.map(item => <Choice key={item} label={item} selected={formation === item} onPress={() => chooseFormation(item)} />)}</View>
               <Choice label="Calcular mejor once" disabled={!team} onPress={applyBestLineup} />
               {lineupMessage ? <Text style={styles.importMessage}>{lineupMessage}</Text> : null}
