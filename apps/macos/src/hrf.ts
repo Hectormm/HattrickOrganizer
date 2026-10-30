@@ -21,7 +21,8 @@ export type Team = {id: string | null; name: string; players: Player[]};
 export type HrfSubstitution = {slot: string; outgoingPlayerId: string; incomingPlayerId: string; minute: number; standing: number; card: number};
 export type HrfImport = {
   team: Team;
-  formation?: '3-5-2' | '4-4-2' | '4-5-1' | '5-3-2' | '3-4-3';
+  matchContext?: {teamSpirit?: number; confidence?: number; coachModifier?: number};
+  formation?: '3-5-2' | '4-4-2' | '4-5-1' | '5-3-2' | '3-4-3' | '5-5-0';
   lineup?: Record<string, string>;
   behaviors?: Record<string, 'Normal' | 'Ofensivo' | 'Defensivo' | 'Hacia el centro' | 'Hacia la banda'>;
   tactic?: 'Normal' | 'Ataque por el centro' | 'Ataque por las bandas' | 'Contraataques' | 'Presionar' | 'Jugar creativamente' | 'Tiros lejanos';
@@ -68,7 +69,7 @@ function parseLastLineup(values: Record<string, string>, players: Player[]): Pic
   });
   const count = (group: string) => selectedRoles.filter(field => field.group === group).length;
   const formation = `${count('defence')}-${count('midfield')}-${count('forward')}` as HrfImport['formation'];
-  const supportedFormations = ['3-5-2', '4-4-2', '4-5-1', '5-3-2', '3-4-3'];
+  const supportedFormations = ['3-5-2', '4-4-2', '4-5-1', '5-3-2', '3-4-3', '5-5-0'];
   if (!supportedFormations.includes(formation ?? '') || !selectedRoles.some(field => field.group === 'keeper')) return {};
 
   const slots: Record<string, string> = {keeper: 'Portero'};
@@ -157,6 +158,7 @@ export function parseHrf(source: string): HrfImport {
   if (current) sections.push(current);
 
   const basics = sections.find(section => section.type === 'basics')?.values ?? {};
+  const teamDetails = sections.find(section => section.type === 'team')?.values ?? {};
   const players = sections
     .filter(section => section.type === 'player' && section.id)
     .map(({id, values}): Player => ({
@@ -180,8 +182,16 @@ export function parseHrf(source: string): HrfImport {
 
   if (!players.length) throw new Error('No encuentro jugadores del primer equipo en este HRF.');
   const lastLineup = sections.find(section => section.type === 'lastlineup')?.values;
+  const spirit = numberOrNull(teamDetails.stamningvalue);
+  const confidence = numberOrNull(teamDetails.sjalvfortroendevalue);
+  const coachModifier = numberOrNull(lastLineup?.styleofplay);
   return {
     team: {id: basics.teamid || null, name: basics.teamname || 'Equipo importado', players},
+    matchContext: {
+      ...(spirit !== null && spirit >= 0 && spirit <= 10 ? {teamSpirit: spirit} : {}),
+      ...(confidence !== null && confidence >= 0 && confidence <= 9 ? {confidence} : {}),
+      ...(coachModifier !== null && coachModifier >= -10 && coachModifier <= 10 ? {coachModifier} : {}),
+    },
     ...(lastLineup ? parseLastLineup(lastLineup, players) : {}),
   };
 }

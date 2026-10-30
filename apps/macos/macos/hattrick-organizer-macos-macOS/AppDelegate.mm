@@ -21,20 +21,22 @@ RCT_REMAP_METHOD(pickHRF,
     panel.allowsMultipleSelection = NO;
     panel.allowedFileTypes = @[@"hrf"];
 
-    if ([panel runModal] != NSModalResponseOK) {
-      resolve([NSNull null]);
-      return;
-    }
+    [panel beginWithCompletionHandler:^(NSModalResponse response) {
+      if (response != NSModalResponseOK) {
+        resolve([NSNull null]);
+        return;
+      }
 
-    NSError *error = nil;
-    NSString *contents = [NSString stringWithContentsOfURL:panel.URL
-                                                  encoding:NSUTF8StringEncoding
-                                                     error:&error];
-    if (contents != nil) {
-      resolve(contents);
-    } else {
-      reject(@"hrf_read_failed", @"No se pudo leer el archivo HRF en UTF-8.", error);
-    }
+      NSError *error = nil;
+      NSString *contents = [NSString stringWithContentsOfURL:panel.URL
+                                                    encoding:NSUTF8StringEncoding
+                                                       error:&error];
+      if (contents != nil) {
+        resolve(contents);
+      } else {
+        reject(@"hrf_read_failed", @"No se pudo leer el archivo HRF en UTF-8.", error);
+      }
+    }];
   });
 }
 

@@ -5,7 +5,7 @@ import {estimateLineupSectors, estimateTacticLevel, getBehaviorsForSlot, getPlay
 import {getBenchSuggestions, getPlayerSlotEstimate, optimizeLineup} from './lineupOptimizer';
 
 type Tab = 'Plantilla' | 'Alineación' | 'Team Analyzer';
-type Formation = '3-5-2' | '4-4-2' | '4-5-1' | '5-3-2' | '3-4-3';
+type Formation = '3-5-2' | '4-4-2' | '4-5-1' | '5-3-2' | '3-4-3' | '5-5-0';
 type Tactic = RatingTactic;
 type RatingKey = 'defenceLeft' | 'defenceCentral' | 'defenceRight' | 'midfield' | 'attackLeft' | 'attackCentral' | 'attackRight';
 type OpponentRatings = Record<RatingKey, string>;
@@ -13,7 +13,7 @@ type MatchSettings = {teamSpirit: string; confidence: string; coachModifier: str
 type PlannedSubstitution = HrfSubstitution;
 
 const tabs: Tab[] = ['Plantilla', 'Alineación', 'Team Analyzer'];
-const formations: Formation[] = ['3-5-2', '4-4-2', '4-5-1', '5-3-2', '3-4-3'];
+const formations: Formation[] = ['3-5-2', '4-4-2', '4-5-1', '5-3-2', '3-4-3', '5-5-0'];
 const tactics: Tactic[] = ['Normal', 'Ataque por el centro', 'Ataque por las bandas', 'Contraataques', 'Presionar', 'Jugar creativamente', 'Tiros lejanos'];
 const defaultMatchSettings: MatchSettings = {teamSpirit: String(defaultMatchContext.teamSpirit), confidence: String(defaultMatchContext.confidence), coachModifier: String(defaultMatchContext.coachModifier), attitude: defaultMatchContext.attitude, venue: defaultMatchContext.venue};
 const goalConditions = [
@@ -357,6 +357,13 @@ export default function App() {
     try {
       const imported = parseHrf(source);
       setTeam(imported.team);
+      if (imported.matchContext && Object.keys(imported.matchContext).length) {
+        setMatchSettings(previous => ({...previous,
+          ...(imported.matchContext?.teamSpirit !== undefined ? {teamSpirit: String(imported.matchContext.teamSpirit)} : {}),
+          ...(imported.matchContext?.confidence !== undefined ? {confidence: String(imported.matchContext.confidence)} : {}),
+          ...(imported.matchContext?.coachModifier !== undefined ? {coachModifier: String(imported.matchContext.coachModifier)} : {}),
+        }));
+      }
       if (imported.formation && imported.lineup) {
         setFormation(imported.formation);
         setLineup(imported.lineup);
