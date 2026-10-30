@@ -13,7 +13,7 @@ type MatchSettings = {teamSpirit: string; confidence: string; coachModifier: str
 
 const tabs: Tab[] = ['Plantilla', 'Alineación', 'Team Analyzer'];
 const formations: Formation[] = ['3-5-2', '4-4-2', '4-5-1', '5-3-2', '3-4-3'];
-const tactics: Tactic[] = ['Normal', 'Ataque por el centro', 'Ataque por las bandas', 'Contraataques', 'Presionar'];
+const tactics: Tactic[] = ['Normal', 'Ataque por el centro', 'Ataque por las bandas', 'Contraataques', 'Presionar', 'Jugar creativamente', 'Tiros lejanos'];
 const defaultMatchSettings: MatchSettings = {teamSpirit: String(defaultMatchContext.teamSpirit), confidence: String(defaultMatchContext.confidence), coachModifier: String(defaultMatchContext.coachModifier), attitude: defaultMatchContext.attitude, venue: defaultMatchContext.venue};
 const skillMetrics: {key: keyof Player; label: string}[] = [
   {key: 'keeper', label: 'Portería'},
@@ -396,7 +396,7 @@ export default function App() {
               {formationRecommendations.length ? (
                 <View style={styles.sectorCard}>
                   <Text style={styles.sectionTitle}>Mejores esquemas y tácticas frente al rival</Text>
-                  <Text style={styles.caption}>Compara 25 combinaciones de formación y táctica con los siete ratings disponibles. El índice es orientativo, no una predicción del marcador.</Text>
+                  <Text style={styles.caption}>Compara 35 combinaciones de formación y táctica con los siete ratings disponibles. El índice es orientativo, no una predicción del marcador.</Text>
                   {formationRecommendations.slice(0, 3).map(recommendation => (
                     <Choice key={`recommend-${recommendation.formation}-${recommendation.tactic}`} label={`${recommendation.formation} · ${recommendation.tactic} · ${Math.round((recommendation.result.matchupScore ?? 0) * 100)}% de rating relativo · aplicar` } selected={formation === recommendation.formation && tactic === recommendation.tactic} onPress={() => applyFormationRecommendation(recommendation)} />
                   ))}
@@ -441,8 +441,12 @@ export default function App() {
                   <Text style={styles.caption}>{tactic === 'Contraataques'
                     ? 'Cálculo HO con forma y habilidades de defensa y pases de los defensas.'
                     : tactic === 'Presionar'
-                      ? 'Cálculo HO al minuto 90 con defensa, forma, experiencia, fidelidad, resistencia y especialidad Potente; asume clima neutro.'
-                      : 'Cálculo HO con el nivel de Pases de los diez jugadores de campo.'}</Text>
+                      ? 'Cálculo HO al minuto 90 con defensa, forma, experiencia, fidelidad, resistencia y especialidad Potente; aplica el clima seleccionado.'
+                      : tactic === 'Jugar creativamente'
+                        ? 'Cálculo HO con pases, forma, fidelidad, experiencia y especialidad Imprevisible de los jugadores de campo.'
+                        : tactic === 'Tiros lejanos'
+                          ? 'Cálculo HO con anotación, balón parado y fidelidad de los jugadores de campo.'
+                          : 'Cálculo HO con el nivel de Pases de los diez jugadores de campo.'}</Text>
                 </View>
               ) : null}
               {team && Object.keys(lineup).length > 0 && team.players.some(player => !Object.values(lineup).includes(player.id)) ? (

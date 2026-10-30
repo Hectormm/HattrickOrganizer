@@ -1,7 +1,7 @@
 import {Player} from './hrf';
 
 export type PositionGroup = 'keeper' | 'centralDefender' | 'back' | 'innerMidfielder' | 'winger' | 'forward';
-export type RatingTactic = 'Normal' | 'Ataque por el centro' | 'Ataque por las bandas' | 'Contraataques' | 'Presionar';
+export type RatingTactic = 'Normal' | 'Ataque por el centro' | 'Ataque por las bandas' | 'Contraataques' | 'Presionar' | 'Jugar creativamente' | 'Tiros lejanos';
 export type PlayerBehavior = 'Normal' | 'Ofensivo' | 'Defensivo' | 'Hacia el centro' | 'Hacia la banda';
 export type MatchWeather = 'Neutro' | 'Soleado' | 'Lluvioso';
 export type MatchAttitude = 'Normal' | 'Jugar relajados' | 'Partido de la temporada';
@@ -26,7 +26,7 @@ type RatingSector = 'defenceLeft' | 'defenceCentral' | 'defenceRight' | 'midfiel
 type ContributionSet = 'sideDefence' | 'centralDefence' | 'midfield' | 'sideAttack' | 'centralAttack';
 type Side = 'left' | 'middle' | 'right';
 type SideRestriction = 'none' | 'thisSide' | 'middleOnly' | 'oppositeSide';
-type Skill = 'keeper' | 'defending' | 'playmaking' | 'passing' | 'winger' | 'scoring' | 'stamina' | 'experience';
+type Skill = 'keeper' | 'defending' | 'playmaking' | 'passing' | 'winger' | 'scoring' | 'setPieces' | 'stamina' | 'experience';
 
 type Factor = [ContributionSet, Skill, Sector, SideRestriction, PlayerBehavior, number, number?];
 type Position = {role: number; sector: Sector; side: Side};
@@ -275,13 +275,22 @@ function sectorContextFactor(key: RatingSector, context: MatchContext): number {
   return factor;
 }
 
-function normalRating(player: Player, position: Position, behavior: PlayerBehavior = 'Normal', weather: MatchWeather = 'Neutro', pressing = false, context: MatchContext = defaultMatchContext): number {
+function tacticSectorFactor(key: RatingSector, tactic: RatingTactic): number {
+  if (tactic === 'Contraataques' && key === 'midfield') return 0.93;
+  if (tactic === 'Ataque por el centro' && (key === 'defenceLeft' || key === 'defenceRight')) return 0.85;
+  if (tactic === 'Ataque por las bandas' && key === 'defenceCentral') return 0.85;
+  if (tactic === 'Jugar creativamente' && key.startsWith('defence')) return 0.93;
+  if (tactic === 'Tiros lejanos' && (key === 'midfield' || key.startsWith('attack'))) return 0.96;
+  return 1;
+}
+
+function normalRating(player: Player, position: Position, behavior: PlayerBehavior = 'Normal', weather: MatchWeather = 'Neutro', tactic: RatingTactic = 'Normal', context: MatchContext = defaultMatchContext): number {
   let cache = playerRoleRatingCache.get(player);
   if (!cache) {
     cache = new Map<string, number>();
     playerRoleRatingCache.set(player, cache);
   }
-  const cacheKey = `${position.role}:${behavior}:${weather}:${pressing}:${context.teamSpirit}:${context.confidence}:${context.coachModifier}:${context.attitude}:${context.venue}`;
+  const cacheKey = `${position.role}:${behavior}:${weather}:${tactic}:${context.teamSpirit}:${context.confidence}:${context.coachModifier}:${context.attitude}:${context.venue}`;
   const cached = cache.get(cacheKey);
   if (cached !== undefined) return cached;
   let sum = 0;
@@ -290,9 +299,9 @@ function normalRating(player: Player, position: Position, behavior: PlayerBehavi
     let sectorContribution = contribution;
     if (contribution > 0) sectorContribution += experienceContribution(player, sector.experience);
     sectorContribution *= weatherFactor(player, weather);
-    sum += sectorContribution * sector.scale * (sector.key === 'midfield' ? 3 : 1) * sectorContextFactor(sector.key, context);
+    sum += sectorContribution * sector.scale * (sector.key === 'midfield' ? 3 : 1) * tacticSectorFactor(sector.key, tactic) * sectorContextFactor(sector.key, context);
   }
-  const rating = sum > 0 ? (sum ** 1.2 / 4) * averageStaminaFactor(player, pressing) : 0;
+  const rating = sum > 0 ? (sum ** 1.2 / 4) * averageStaminaFactor(player, tactic === 'Presionar') : 0;
   cache.set(cacheKey, rating);
   return rating;
 }
@@ -360,11 +369,7 @@ export function estimateLineupSectors(players: Player[], lineup: Record<string, 
   }
 
   for (const sector of ratingSectors) {
-    let tacticFactor = 1;
-    if (sector.key === 'midfield' && tactic === 'Contraataques') tacticFactor = 0.93;
-    if ((sector.key === 'defenceLeft' || sector.key === 'defenceRight') && tactic === 'Ataque por el centro') tacticFactor = 0.85;
-    if (sector.key === 'defenceCentral' && tactic === 'Ataque por las bandas') tacticFactor = 0.85;
-    const base = totals[sector.key] * sector.scale * (sector.key === 'midfield' ? 3 : 1) * tacticFactor * sectorContextFactor(sector.key, context);
+    const base = totals[sector.key] * sector.scale * (sector.key === 'midfield' ? 3 : 1) * tacticSectorFactor(sector.key, tactic) * sectorContextFactor(sector.key, context);
     totals[sector.key] = base > 0 ? base ** 1.2 / 4 + 1 : 0.75;
   }
   return totals;
@@ -372,12 +377,12 @@ export function estimateLineupSectors(players: Player[], lineup: Record<string, 
 
 export function getPlayerPositionEstimate(player: Player, group: PositionGroup, weather: MatchWeather = 'Neutro', tactic: RatingTactic = 'Normal', context: MatchContext = defaultMatchContext): number {
   const roles = new Set(roleIdsByGroup[group]);
-  return positions.filter(position => roles.has(position.role)).reduce((best, position) => Math.max(best, normalRating(player, position, 'Normal', weather, tactic === 'Presionar', context)), 0);
+  return positions.filter(position => roles.has(position.role)).reduce((best, position) => Math.max(best, normalRating(player, position, 'Normal', weather, tactic, context)), 0);
 }
 
 export function getPlayerRoleEstimate(player: Player, roleId: number, behavior: PlayerBehavior = 'Normal', weather: MatchWeather = 'Neutro', tactic: RatingTactic = 'Normal', context: MatchContext = defaultMatchContext): number {
   const position = positions.find(candidate => candidate.role === roleId);
-  return position ? normalRating(player, position, behavior, weather, tactic === 'Presionar', context) : 0;
+  return position ? normalRating(player, position, behavior, weather, tactic, context) : 0;
 }
 
 function matchStaminaFactor(player: Player, minute: number, pressing: boolean): number {
@@ -437,6 +442,23 @@ export function estimateTacticLevel(players: Player[], lineup: Record<string, st
       .filter((player): player is Player => Boolean(player))
       .reduce((sum, player) => sum + loyaltyValue(player) + skillValue(player, 'passing'), 0);
     return passingTotal / 5 - 2;
+  }
+
+  if (tactic === 'Tiros lejanos') {
+    const playersOnField = slots.filter(slot => slot !== 'Portero').map(slot => playerById.get(lineup[slot])).filter((player): player is Player => Boolean(player));
+    if (!playersOnField.length) return 0;
+    const scoring = playersOnField.reduce((sum, player) => sum + loyaltyValue(player) + skillValue(player, 'scoring'), 0);
+    const setPieces = playersOnField.reduce((sum, player) => sum + loyaltyValue(player) + skillValue(player, 'setPieces'), 0);
+    return Math.max(0, (1.66 * scoring + 0.55 * setPieces) / playersOnField.length - 7.6);
+  }
+
+  if (tactic === 'Jugar creativamente') {
+    return slots.filter(slot => slot !== 'Portero').map(slot => playerById.get(lineup[slot])).filter((player): player is Player => Boolean(player))
+      .reduce((sum, player) => {
+        let contribution = 4 * playerStrength(player, 'passing') + skillValue(player, 'experience');
+        if (player.specialty === 4) contribution *= 2;
+        return sum + contribution;
+      }, 0) / 50;
   }
 
   const defenders = slots
