@@ -1,9 +1,20 @@
 # Hattrick Organizer for macOS (React Native prototype)
 
-Initial UI shell for the planned migration. It provides navigation for Squad, Lineup, and Team Analyzer; domain data and the existing Java calculation engine are not connected yet.
+This React Native for macOS prototype has three working screens:
+
+- **Plantilla** opens an `.hrf` file with the native macOS file picker (or accepts pasted text) and reads the team name, first-team players, and player skills.
+- **Alineación** supports five formations, player assignment to positions, and match tactic selection. A player can only occupy one position at a time.
+- **Team Analyzer** calculates squad averages for keeper, defending, playmaking, passing, winger, and scoring skills from the imported roster.
+
+The HRF reader is a small TypeScript parser for the current UI. The original Java domain model, lineup ratings, match orders, substitutions, CHPP sync, and persistence have not been ported or connected yet. Tactical choices currently update the draft in the interface and do not write a Hattrick match order.
 
 ## Local setup
 
-This scaffold targets React Native 0.76 with the matching `react-native-macos` 0.76 line. Install Xcode (not only Command Line Tools), Node.js, and CocoaPods, then generate the macOS native project using the React Native macOS getting-started instructions. After the native project exists, run `npm install` and `npm run macos` from this directory.
+The app targets React Native 0.76.9 with `react-native-macos` 0.76.12. It requires Xcode, Node.js, and CocoaPods. From this directory:
 
-The prototype intentionally contains no CHPP credentials or data migration. The next implementation step is to define a typed bridge contract to the existing Java lineup/rating engine and add read-only sample data.
+```sh
+npm install
+npm run macos
+```
+
+Use Node 20.19 or newer for the Metro toolchain. The macOS native project is in `macos/`.

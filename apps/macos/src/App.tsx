@@ -1,5 +1,6 @@
-import React, {useState} from 'react';
-import {SafeAreaView, ScrollView, StyleSheet, Text, View} from 'react-native';
+import React, {useMemo, useState} from 'react';
+import {NativeModules, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, View} from 'react-native';
+import {parseHrf, Player, Team} from './hrf';
 
 type Tab = 'Plantilla' | 'Alineación' | 'Team Analyzer';
 type Formation = '3-5-2' | '4-4-2' | '4-5-1' | '5-3-2' | '3-4-3';
@@ -8,6 +9,14 @@ type Tactic = 'Normal' | 'Ataque por el centro' | 'Ataque por las bandas' | 'Con
 const tabs: Tab[] = ['Plantilla', 'Alineación', 'Team Analyzer'];
 const formations: Formation[] = ['3-5-2', '4-4-2', '4-5-1', '5-3-2', '3-4-3'];
 const tactics: Tactic[] = ['Normal', 'Ataque por el centro', 'Ataque por las bandas', 'Contraataques', 'Presionar'];
+const skillMetrics: {key: keyof Player; label: string}[] = [
+  {key: 'keeper', label: 'Portería'},
+  {key: 'defending', label: 'Defensa'},
+  {key: 'playmaking', label: 'Jugadas'},
+  {key: 'passing', label: 'Pases'},
+  {key: 'winger', label: 'Lateral'},
+  {key: 'scoring', label: 'Anotación'},
+];
 
 function formationRows(formation: Formation): string[][] {
   const [defenders, midfielders, forwards] = formation.split('-').map(Number);
@@ -15,25 +24,70 @@ function formationRows(formation: Formation): string[][] {
   return [line(forwards, 'Delantero'), line(midfielders, 'Centrocampista'), line(defenders, 'Defensa'), ['Portero']];
 }
 
-function Choice({label, selected, onPress}: {label: string; selected: boolean; onPress: () => void}) {
+function Choice({label, selected, disabled, onPress}: {label: string; selected?: boolean; disabled?: boolean; onPress: () => void}) {
   return (
-    <Text accessibilityRole="button" onPress={onPress} style={[styles.choice, selected && styles.choiceActive]}>
+    <Text accessibilityRole="button" accessibilityState={{disabled: Boolean(disabled), selected: Boolean(selected)}} onPress={disabled ? undefined : onPress} style={[styles.choice, selected && styles.choiceActive, disabled && styles.choiceDisabled]}>
       {label}
     </Text>
   );
+}
+
+function average(players: Player[], key: keyof Player): string {
+  const values = players.map(player => player[key]).filter((value): value is number => typeof value === 'number');
+  return values.length ? (values.reduce((sum, value) => sum + value, 0) / values.length).toFixed(1) : '—';
 }
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<Tab>('Alineación');
   const [formation, setFormation] = useState<Formation>('3-5-2');
   const [tactic, setTactic] = useState<Tactic>('Normal');
-  const rows = formationRows(formation);
+  const [team, setTeam] = useState<Team | null>(null);
+  const [hrfText, setHrfText] = useState('');
+  const [importMessage, setImportMessage] = useState('');
+  const [lineup, setLineup] = useState<Record<string, string>>({});
+  const [activeSlot, setActiveSlot] = useState<string | null>(null);
+  const rows = useMemo(() => formationRows(formation), [formation]);
+  const slots = useMemo(() => rows.flat(), [rows]);
+  const assignedElsewhere = new Set(Object.entries(lineup).filter(([slot]) => slot !== activeSlot).map(([, playerId]) => playerId));
+
+  const chooseFormation = (next: Formation) => {
+    setFormation(next);
+    const availableSlots = new Set(formationRows(next).flat());
+    setLineup(previous => Object.fromEntries(Object.entries(previous).filter(([slot]) => availableSlots.has(slot))));
+    setActiveSlot(null);
+  };
+
+  const importTeam = (source = hrfText) => {
+    try {
+      const imported = parseHrf(source);
+      setTeam(imported);
+      setLineup({});
+      setActiveSlot(null);
+      setImportMessage(`${imported.players.length} jugadores importados · ${imported.name}`);
+    } catch (error) {
+      setImportMessage(error instanceof Error ? error.message : 'No se pudo leer el HRF.');
+    }
+  };
+
+  const openHrfFile = async () => {
+    try {
+      const source: string | null = await NativeModules.HODocumentPicker.pickHRF();
+      if (source) {
+        setHrfText(source);
+        importTeam(source);
+      }
+    } catch (error) {
+      setImportMessage(error instanceof Error ? error.message : 'No se pudo abrir el archivo HRF.');
+    }
+  };
+
+  const assignedName = (slot: string) => team?.players.find(player => player.id === lineup[slot])?.name;
 
   return (
     <SafeAreaView style={styles.root}>
       <View style={styles.sidebar}>
         <Text style={styles.brand}>HO</Text>
-        <Text style={styles.club}>HATTRICK ORGANIZER</Text>
+        <Text style={styles.club}>{team?.name ?? 'HATTRICK ORGANIZER'}</Text>
         {tabs.map(tab => (
           <Text accessibilityRole="button" key={tab} onPress={() => setActiveTab(tab)} style={[styles.navItem, activeTab === tab && styles.navActive]}>
             {tab}
@@ -43,21 +97,66 @@ export default function App() {
       <ScrollView contentContainerStyle={styles.content}>
         <Text style={styles.eyebrow}>HATTRICK ORGANIZER · PROTOTIPO NATIVO</Text>
         <Text style={styles.title}>{activeTab}</Text>
+        {activeTab === 'Plantilla' ? (
+          <>
+            <View style={styles.card}>
+              <Text style={styles.cardTitle}>Importar equipo desde un HRF</Text>
+              <Text style={styles.muted}>Abre directamente un archivo .hrf exportado desde Hattrick Organizer. También puedes pegar su contenido.</Text>
+              <Choice label="Abrir archivo .hrf…" onPress={openHrfFile} />
+              <TextInput
+                accessibilityLabel="Contenido del archivo HRF"
+                multiline
+                onChangeText={setHrfText}
+                placeholder="Pega aquí el contenido del archivo .hrf…"
+                placeholderTextColor="#91a1aa"
+                style={styles.hrfInput}
+                value={hrfText}
+              />
+              <Choice label="Importar texto pegado" onPress={() => importTeam()} />
+              {importMessage ? <Text style={styles.importMessage}>{importMessage}</Text> : null}
+            </View>
+            {team ? (
+              <View style={styles.card}>
+                <Text style={styles.cardTitle}>{team.name} · {team.players.length} jugadores</Text>
+                {team.players.map(player => (
+                  <View key={player.id} style={styles.playerRow}>
+                    <Text style={styles.playerName}>{player.name}</Text>
+                    <Text style={styles.playerSkills}>DEF {player.defending ?? '—'} · JUG {player.playmaking ?? '—'} · LAT {player.winger ?? '—'} · ANO {player.scoring ?? '—'}</Text>
+                  </View>
+                ))}
+              </View>
+            ) : <View style={styles.card}><Text style={styles.empty}>Importa un HRF para cargar la plantilla real de tu equipo.</Text></View>}
+          </>
+        ) : null}
         {activeTab === 'Alineación' ? (
           <>
             <View style={styles.card}>
               <Text style={styles.cardTitle}>Esquema de juego</Text>
-              <Text style={styles.muted}>Elige una formación para preparar el once. La conexión con los jugadores del club está pendiente.</Text>
-              <View style={styles.choices}>{formations.map(item => <Choice key={item} label={item} selected={formation === item} onPress={() => setFormation(item)} />)}</View>
+              <Text style={styles.muted}>{team ? `${team.name} · toca una posición para asignar un jugador.` : 'Importa tu HRF desde Plantilla para asignar a tus jugadores.'}</Text>
+              <View style={styles.choices}>{formations.map(item => <Choice key={item} label={item} selected={formation === item} onPress={() => chooseFormation(item)} />)}</View>
               <Text style={styles.sectionTitle}>Vista del campo · {formation}</Text>
               <View style={styles.pitch}>
                 {rows.map((row, index) => (
                   <View key={`${formation}-${index}`} style={styles.row}>
-                    {row.map(player => <View key={player} style={styles.position}><Text style={styles.positionDot}>●</Text><Text style={styles.positionText}>{player}</Text></View>)}
+                    {row.map(slot => (
+                      <Text accessibilityRole="button" key={slot} onPress={() => {setActiveSlot(slot); setActiveTab('Alineación');}} style={[styles.position, activeSlot === slot && styles.positionActive]}>
+                        <Text style={styles.positionDot}>●</Text>
+                        <Text style={styles.positionText}>{assignedName(slot) ?? slot}</Text>
+                      </Text>
+                    ))}
                   </View>
                 ))}
               </View>
-              <Text style={styles.caption}>Portero + {formation.split('-').reduce((a, b) => a + Number(b), 0)} jugadores de campo</Text>
+              <Text style={styles.caption}>{Object.keys(lineup).length} de {slots.length} posiciones asignadas</Text>
+              {activeSlot ? (
+                <View style={styles.picker}>
+                  <Text style={styles.sectionTitle}>Elige jugador · {activeSlot}</Text>
+                  {team?.players.map(player => (
+                    <Choice key={player.id} label={`${player.name} · DEF ${player.defending ?? '—'} · JUG ${player.playmaking ?? '—'} · ANO ${player.scoring ?? '—'}`} disabled={assignedElsewhere.has(player.id)} selected={lineup[activeSlot] === player.id} onPress={() => {setLineup(previous => ({...previous, [activeSlot]: player.id})); setActiveSlot(null);}} />
+                  ))}
+                  <Choice label="Dejar posición vacía" onPress={() => {setLineup(previous => {const next = {...previous}; delete next[activeSlot]; return next;}); setActiveSlot(null);}} />
+                </View>
+              ) : null}
             </View>
             <View style={styles.card}>
               <Text style={styles.cardTitle}>Órdenes del equipo</Text>
@@ -66,13 +165,19 @@ export default function App() {
               <View style={styles.summary}><Text style={styles.summaryLabel}>Planteamiento actual</Text><Text style={styles.summaryValue}>{formation} · {tactic}</Text></View>
             </View>
           </>
-        ) : (
+        ) : null}
+        {activeTab === 'Team Analyzer' ? (
           <View style={styles.card}>
-            <Text style={styles.cardTitle}>{activeTab}</Text>
-            <Text style={styles.muted}>La importación de plantilla y las valoraciones del motor original todavía no están conectadas a esta interfaz.</Text>
-            <Text style={styles.empty}>Carga de datos de equipo pendiente</Text>
+            <Text style={styles.cardTitle}>Medias de habilidades de la plantilla</Text>
+            <Text style={styles.muted}>{team ? `${team.name} · ${team.players.length} jugadores` : 'Importa un HRF desde Plantilla para analizar tu equipo.'}</Text>
+            {team ? skillMetrics.map(metric => (
+              <View key={metric.key} style={styles.metricRow}>
+                <Text style={styles.metricName}>{metric.label}</Text>
+                <Text style={styles.metricValue}>{average(team.players, metric.key)}</Text>
+              </View>
+            )) : <Text style={styles.empty}>Todavía no hay datos cargados</Text>}
           </View>
-        )}
+        ) : null}
       </ScrollView>
     </SafeAreaView>
   );
@@ -94,15 +199,26 @@ const styles = StyleSheet.create({
   choices: {flexDirection: 'row', flexWrap: 'wrap', marginTop: 14},
   choice: {paddingVertical: 8, paddingHorizontal: 13, marginRight: 8, marginBottom: 8, borderRadius: 8, overflow: 'hidden', backgroundColor: '#edf2f5', color: '#385465', fontSize: 13},
   choiceActive: {backgroundColor: '#1c6b83', color: '#fff', fontWeight: '700'},
+  choiceDisabled: {opacity: 0.4},
   sectionTitle: {marginTop: 12, marginBottom: 10, color: '#19384b', fontSize: 15, fontWeight: '700'},
   pitch: {paddingVertical: 12, paddingHorizontal: 10, borderRadius: 12, backgroundColor: '#e9f3ed', borderWidth: 1, borderColor: '#d6e8dc'},
-  row: {flexDirection: 'row', justifyContent: 'center', alignItems: 'center', minHeight: 54},
-  position: {minWidth: 100, alignItems: 'center', marginHorizontal: 5},
+  row: {flexDirection: 'row', justifyContent: 'center', alignItems: 'center', minHeight: 58},
+  position: {minWidth: 100, alignItems: 'center', marginHorizontal: 5, padding: 5, borderRadius: 7, overflow: 'hidden', color: '#35584a'},
+  positionActive: {backgroundColor: '#d4e8db'},
   positionDot: {color: '#267550', fontSize: 17},
-  positionText: {marginTop: 3, color: '#35584a', fontSize: 11},
+  positionText: {marginTop: 3, color: '#35584a', fontSize: 11, textAlign: 'center'},
   caption: {marginTop: 9, color: '#758995', fontSize: 12},
+  picker: {marginTop: 12, padding: 14, borderRadius: 10, backgroundColor: '#f6f8f9'},
   summary: {marginTop: 10, padding: 14, borderRadius: 9, backgroundColor: '#f3f7f9'},
   summaryLabel: {fontSize: 11, color: '#718591'},
   summaryValue: {marginTop: 3, fontSize: 15, color: '#19384b', fontWeight: '700'},
-  empty: {marginTop: 28, padding: 20, textAlign: 'center', color: '#8295a0', backgroundColor: '#f5f8fa', borderRadius: 10, overflow: 'hidden'},
+  empty: {marginTop: 22, padding: 20, textAlign: 'center', color: '#8295a0', backgroundColor: '#f5f8fa', borderRadius: 10, overflow: 'hidden'},
+  hrfInput: {height: 140, marginTop: 16, marginBottom: 10, padding: 12, borderWidth: 1, borderColor: '#dbe4e9', borderRadius: 8, color: '#19384b', backgroundColor: '#fafcfd', textAlignVertical: 'top'},
+  importMessage: {marginTop: 6, color: '#267550', fontSize: 13},
+  playerRow: {paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#edf1f3'},
+  playerName: {color: '#19384b', fontSize: 14, fontWeight: '600'},
+  playerSkills: {marginTop: 4, color: '#617785', fontSize: 12},
+  metricRow: {flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#edf1f3'},
+  metricName: {color: '#385465', fontSize: 14},
+  metricValue: {color: '#19384b', fontSize: 15, fontWeight: '700'},
 });
